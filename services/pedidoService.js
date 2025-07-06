@@ -392,6 +392,44 @@ const pedidoService = {
       throw new Error("Erro ao buscar seus produtos digitais.");
     }
   },
+   async buscarProdutosRelacionados(produtoId, limite = 4) {
+    try {
+      const produtoAtual = await Produto.findByPk(produtoId);
+      if (!produtoAtual || !produtoAtual.categoriaId) {
+        return []; // Retorna vazio se o produto ou sua categoria não forem encontrados
+      }
+
+      const relacionados = await Produto.findAll({
+        where: {
+          categoriaId: produtoAtual.categoriaId,
+          id: { [Op.ne]: produtoId }, // Exclui o próprio produto da lista
+          ativo: true,
+        },
+        limit: parseInt(limite),
+        include: [
+          { model: ArquivoProduto, as: 'ArquivoProdutos', required: false },
+          { model: VariacaoProduto, as: 'variacoes', required: false },
+        ],
+      });
+
+      // Formata os produtos para o frontend, garantindo a URL completa da imagem
+      const baseUrl = process.env.BASE_URL || 'http://localhost:3035';
+      const produtosFormatados = relacionados.map(produto => {
+        const p = produto.toJSON();
+        p.imagens = p.ArquivoProdutos
+          ?.filter(arq => arq.tipo === 'imagem')
+          .sort((a, b) => (a.principal ? -1 : 1) - (b.principal ? -1 : 1))
+          .map(arq => new URL(arq.url.replace(/\\/g, '/'), baseUrl).href);
+        return p;
+      });
+
+      return produtosFormatados;
+
+    } catch (error) {
+      console.error("Erro ao buscar produtos relacionados:", error);
+      throw error;
+    }
+  },
 }
 
 module.exports = pedidoService;
