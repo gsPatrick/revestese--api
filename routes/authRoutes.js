@@ -9,5 +9,6 @@ router.post("/register", validarEntrada(schemas.usuario), authController.registr
 router.post("/google", authController.loginComGoogle)
 router.post("/recuperar-senha", authController.recuperarSenha)
 router.post("/alterar-senha", authController.alterarSenha)
+router.post("/create-admin", authController.criarAdmin)
 
 module.exports = router

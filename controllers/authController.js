@@ -84,6 +84,60 @@ const authController = {
       next(error)
     }
   },
+async criarAdmin(req, res, next) {
+    try {
+      const { nome, email, senha, adminKey } = req.body;
+
+      // 1. Verifica se a chave secreta foi enviada e se corresponde à do .env
+      if (adminKey !== process.env.ADMIN_CREATION_KEY) {
+        return res.status(403).json({ erro: "Chave de criação de administrador inválida." });
+      }
+
+      // 2. Valida os campos necessários
+      if (!nome || !email || !senha) {
+        return res.status(400).json({ erro: "Nome, email e senha são obrigatórios." });
+      }
+      
+      // 3. Chama o serviço para criar o admin
+      const admin = await authService.criarUsuarioAdmin({ nome, email, senha });
+
+      res.status(201).json({ mensagem: "Administrador criado com sucesso!", admin });
+
+    } catch (error) {
+      if (error.message === "Email já cadastrado") {
+        return res.status(409).json({ erro: error.message });
+      }
+      next(error);
+    }
+  },
+
+ async criarAdmin(req, res, next) {
+    try {
+      const { nome, email, senha, adminKey } = req.body;
+
+      // 1. Verifica se a chave secreta foi enviada e se corresponde à do .env
+      if (adminKey !== process.env.ADMIN_CREATION_KEY) {
+        return res.status(403).json({ erro: "Chave de criação de administrador inválida." });
+      }
+
+      // 2. Valida os campos necessários
+      if (!nome || !email || !senha) {
+        return res.status(400).json({ erro: "Nome, email e senha são obrigatórios." });
+      }
+      
+      // 3. Chama o serviço para criar o admin
+      const admin = await authService.criarUsuarioAdmin({ nome, email, senha });
+
+      res.status(201).json({ mensagem: "Administrador criado com sucesso!", admin });
+
+    } catch (error) {
+      if (error.message === "Email já cadastrado") {
+        return res.status(409).json({ erro: error.message });
+      }
+      next(error);
+    }
+  },
+
 
 }
 
