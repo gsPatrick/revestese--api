@@ -1,5 +1,4 @@
 const pedidoService = require("../services/pedidoService")
-const carrinhoService = require("../services/carrinhoService")
 const cupomService = require("../services/cupomService")
 const freteService = require("../services/freteService")
 const configuracaoLojaService = require("../services/configuracaoLojaService")
