@@ -121,44 +121,30 @@ const produtoService = {
       const produtosFormatados = produtos.map(produto => {
         const p = produto.toJSON();
 
-        // Adiciona o array de imagens principal
-        p.imagens = p.ArquivoProdutos
+        p.imagens = (p.ArquivoProdutos || [])
           .filter(arq => arq.tipo === 'imagem')
-          .sort((a, b) => (a.principal ? -1 : 1) - (b.principal ? -1 : 1) || a.ordem - b.ordem) // Principal primeiro
-          .map(arq => {
-            const path = arq.url.replace(/\\/g, '/');
-            return new URL(path, baseUrl).href;
-          });
+          .sort((a, b) => (a.principal ? -1 : 1) - (b.principal ? -1 : 1) || a.ordem - b.ordem)
+          .map(arq => new URL(arq.url.replace(/\\/g, '/'), baseUrl).href);
 
-        // Adiciona o array de itens para download
-        p.itensDownload = p.ArquivoProdutos
+        p.itensDownload = (p.ArquivoProdutos || [])
           .filter(arq => arq.tipo === 'arquivo')
           .map(arq => ({
             id: arq.id,
             nome: arq.nome,
-            url: (() => {
-              const path = arq.url.replace(/\\/g, '/');
-              return new URL(path, baseUrl).href;
-            })()
+            url: new URL(arq.url.replace(/\\/g, '/'), baseUrl).href
           }));
           
-        // Adiciona o array de vídeos
-        p.videos = p.ArquivoProdutos
+        p.videos = (p.ArquivoProdutos || [])
           .filter(arq => arq.tipo === 'video')
           .map(arq => ({
             id: arq.id,
             nome: arq.nome,
-            url: (() => {
-              const path = arq.url.replace(/\\/g, '/');
-              return new URL(path, baseUrl).href;
-            })(),
+            url: new URL(arq.url.replace(/\\/g, '/'), baseUrl).href,
             metadados: arq.metadados
           }));
           
-        // Converter URL de todos os ArquivoProdutos para absoluto
-        p.ArquivoProdutos = p.ArquivoProdutos.map(arq => {
-          const path = arq.url.replace(/\\/g, '/');
-          return { ...arq, url: new URL(path, baseUrl).href };
+        p.ArquivoProdutos = (p.ArquivoProdutos || []).map(arq => {
+          return { ...arq, url: new URL(arq.url.replace(/\\/g, '/'), baseUrl).href };
         });
 
         return p;
@@ -176,83 +162,59 @@ const produtoService = {
     }
   },
 
-  async buscarProdutoPorId(id) {
+  async buscarProdutoPorId(idOuSlug) {
     try {
+      const isNumeric = !isNaN(parseFloat(idOuSlug)) && isFinite(idOuSlug);
+      const whereClause = isNumeric 
+        ? { id: idOuSlug, ativo: true } 
+        : { slug: idOuSlug, ativo: true };
+
       const produto = await Produto.findOne({
-        where: { id, ativo: true },
+        where: whereClause,
         include: [
-          {
-            model: ArquivoProduto,
-            as: "ArquivoProdutos",
-            required: false,
-          },
-          {
-            model: Avaliacao,
-            include: [{ model: Usuario, attributes: ["nome"] }],
-          },
-          {
-            model: Categoria,
-            as: 'categoria',
-            attributes: ['id', 'nome']
-          },
-          {
-            model: VariacaoProduto,
-            as: 'variacoes',
-            required: false,
-          }
+          { model: ArquivoProduto, as: "ArquivoProdutos", required: false },
+          { model: Avaliacao, include: [{ model: Usuario, attributes: ["nome"] }] },
+          { model: Categoria, as: 'categoria', attributes: ['id', 'nome'] },
+          { model: VariacaoProduto, as: 'variacoes', required: false }
         ],
-      })
+      });
 
       if (!produto) {
-        throw new Error("Produto não encontrado")
+        throw new Error("Produto não encontrado");
       }
 
       const produtoJSON = produto.toJSON();
       const baseUrl = process.env.BASE_URL || 'http://localhost:3035';
 
-      // Adiciona o array de imagens principal
-      produtoJSON.imagens = produtoJSON.ArquivoProdutos
+      produtoJSON.imagens = (produtoJSON.ArquivoProdutos || [])
         .filter(arq => arq.tipo === 'imagem')
         .sort((a, b) => (a.principal === b.principal) ? 0 : a.principal ? -1 : 1)
-        .map(arq => {
-          const path = arq.url.replace(/\\/g, '/');
-          return new URL(path, baseUrl).href;
-        });
+        .map(arq => new URL(arq.url.replace(/\\/g, '/'), baseUrl).href);
 
-      // Adiciona o array de itens para download
-      produtoJSON.itensDownload = produtoJSON.ArquivoProdutos
+      produtoJSON.itensDownload = (produtoJSON.ArquivoProdutos || [])
         .filter(arq => arq.tipo === 'arquivo')
         .map(arq => ({
           id: arq.id,
           nome: arq.nome,
-          url: (() => {
-            const path = arq.url.replace(/\\/g, '/');
-            return new URL(path, baseUrl).href;
-          })()
+          url: new URL(arq.url.replace(/\\/g, '/'), baseUrl).href
         }));
         
-      // Adiciona o array de vídeos
-      produtoJSON.videos = produtoJSON.ArquivoProdutos
+      produtoJSON.videos = (produtoJSON.ArquivoProdutos || [])
         .filter(arq => arq.tipo === 'video')
         .map(arq => ({
           id: arq.id,
           nome: arq.nome,
-          url: (() => {
-            const path = arq.url.replace(/\\/g, '/');
-            return new URL(path, baseUrl).href;
-          })(),
+          url: new URL(arq.url.replace(/\\/g, '/'), baseUrl).href,
           metadados: arq.metadados
         }));
 
-      // Converter URL de todos os ArquivoProdutos para absoluto
-      produtoJSON.ArquivoProdutos = produtoJSON.ArquivoProdutos.map(arq => {
-        const path = arq.url.replace(/\\/g, '/');
-        return { ...arq, url: new URL(path, baseUrl).href };
+      produtoJSON.ArquivoProdutos = (produtoJSON.ArquivoProdutos || []).map(arq => {
+        return { ...arq, url: new URL(arq.url.replace(/\\/g, '/'), baseUrl).href };
       });
 
       return produtoJSON;
     } catch (error) {
-      throw error
+      throw error;
     }
   },
 
@@ -310,10 +272,6 @@ const produtoService = {
         throw new Error("Arquivo não encontrado")
       }
 
-      // TODO: Excluir o arquivo do sistema de arquivos (e.g., S3, local)
-      // const fs = require('fs').promises;
-      // await fs.unlink(arquivo.url);
-
       await arquivo.destroy()
 
       return { message: "Arquivo removido com sucesso" }
@@ -339,66 +297,42 @@ const produtoService = {
       const produtos = await Produto.findAll({
         where: { ativo: true },
         include: [
-          {
-            model: ArquivoProduto,
-            as: 'ArquivoProdutos',
-            where: { tipo: 'imagem' },
-            required: false
-          },
-          {
-            model: VariacaoProduto,
-            as: 'variacoes',
-            required: false
-          }
+          { model: ArquivoProduto, as: 'ArquivoProdutos', required: false },
+          { model: VariacaoProduto, as: 'variacoes', required: false }
         ],
         order: [['createdAt', 'DESC']],
         limit: parseInt(limit, 10),
       });
 
-      // Converter URLs relativas para absolutas
       const baseUrl = process.env.BASE_URL || 'http://localhost:3035';
       
       const produtosFormatados = produtos.map(produto => {
         const produtoJSON = produto.toJSON();
         
-        // Adiciona o array de imagens principal
-        produtoJSON.imagens = produtoJSON.ArquivoProdutos
+        produtoJSON.imagens = (produtoJSON.ArquivoProdutos || [])
           .filter(arq => arq.tipo === 'imagem')
           .sort((a, b) => (a.principal === b.principal) ? 0 : a.principal ? -1 : 1)
-          .map(arq => {
-            const path = arq.url.replace(/\\/g, '/');
-            return new URL(path, baseUrl).href;
-          });
+          .map(arq => new URL(arq.url.replace(/\\/g, '/'), baseUrl).href);
           
-        // Adiciona o array de itens para download
-        produtoJSON.itensDownload = produtoJSON.ArquivoProdutos
+        produtoJSON.itensDownload = (produtoJSON.ArquivoProdutos || [])
           .filter(arq => arq.tipo === 'arquivo')
           .map(arq => ({
             id: arq.id,
             nome: arq.nome,
-            url: (() => {
-              const path = arq.url.replace(/\\/g, '/');
-              return new URL(path, baseUrl).href;
-            })()
+            url: new URL(arq.url.replace(/\\/g, '/'), baseUrl).href
           }));
           
-        // Adiciona o array de vídeos
-        produtoJSON.videos = produtoJSON.ArquivoProdutos
+        produtoJSON.videos = (produtoJSON.ArquivoProdutos || [])
           .filter(arq => arq.tipo === 'video')
           .map(arq => ({
             id: arq.id,
             nome: arq.nome,
-            url: (() => {
-              const path = arq.url.replace(/\\/g, '/');
-              return new URL(path, baseUrl).href;
-            })(),
+            url: new URL(arq.url.replace(/\\/g, '/'), baseUrl).href,
             metadados: arq.metadados
           }));
           
-        // Converter URL de todos os ArquivoProdutos para absoluto
-        produtoJSON.ArquivoProdutos = produtoJSON.ArquivoProdutos.map(arq => {
-          const path = arq.url.replace(/\\/g, '/');
-          return { ...arq, url: new URL(path, baseUrl).href };
+        produtoJSON.ArquivoProdutos = (produtoJSON.ArquivoProdutos || []).map(arq => {
+          return { ...arq, url: new URL(arq.url.replace(/\\/g, '/'), baseUrl).href };
         });
         
         return produtoJSON;
@@ -412,7 +346,6 @@ const produtoService = {
 
   async listarMaisVendidos({ limit = 10 } = {}) {
     try {
-      // 1. Buscar todos os pedidos relevantes (pagos, processando, enviados, entregues)
       const pedidos = await Pedido.findAll({
         where: {
           status: { [Op.in]: ['pago', 'processando', 'enviado', 'entregue'] }
@@ -424,11 +357,10 @@ const produtoService = {
         return [];
       }
 
-      // 2. Processar os itens para contar as vendas de cada produto
       const contagemDeVendas = pedidos.reduce((acc, pedido) => {
         if (pedido.itens && Array.isArray(pedido.itens)) {
           pedido.itens.forEach(item => {
-            if (item.id && item.quantidade) { // Usando item.id para produtoId
+            if (item.id && item.quantidade) {
               acc[item.id] = (acc[item.id] || 0) + item.quantidade;
             }
           });
@@ -440,7 +372,6 @@ const produtoService = {
         return [];
       }
 
-      // 3. Ordenar por mais vendidos e pegar os IDs
       const maisVendidosIds = Object.entries(contagemDeVendas)
         .sort(([, a], [, b]) => b - a)
         .slice(0, parseInt(limit, 10))
@@ -450,74 +381,48 @@ const produtoService = {
         return [];
       }
 
-      // 4. Buscar os detalhes dos produtos mais vendidos
       const produtos = await Produto.findAll({
         where: {
           id: { [Op.in]: maisVendidosIds },
           ativo: true
         },
         include: [
-          {
-            model: ArquivoProduto,
-            as: 'ArquivoProdutos',
-            where: { tipo: 'imagem' },
-            required: false
-          },
-          {
-            model: VariacaoProduto,
-            as: 'variacoes',
-            required: false
-          }
+          { model: ArquivoProduto, as: 'ArquivoProdutos', required: false },
+          { model: VariacaoProduto, as: 'variacoes', required: false }
         ]
       });
 
-      // Ordenar os produtos na mesma ordem da popularidade
       const produtosNaoFormatados = maisVendidosIds.map(id => produtos.find(p => p.id == id)).filter(p => p);
       
-      // Converter URLs relativas para absolutas
       const baseUrl = process.env.BASE_URL || 'http://localhost:3035';
       
       const produtosFormatados = produtosNaoFormatados.map(produto => {
         const produtoJSON = produto.toJSON();
         
-        // Adiciona o array de imagens principal
-        produtoJSON.imagens = produtoJSON.ArquivoProdutos
+        produtoJSON.imagens = (produtoJSON.ArquivoProdutos || [])
           .filter(arq => arq.tipo === 'imagem')
           .sort((a, b) => (a.principal === b.principal) ? 0 : a.principal ? -1 : 1)
-          .map(arq => {
-            const path = arq.url.replace(/\\/g, '/');
-            return new URL(path, baseUrl).href;
-          });
+          .map(arq => new URL(arq.url.replace(/\\/g, '/'), baseUrl).href);
           
-        // Adiciona o array de itens para download
-        produtoJSON.itensDownload = produtoJSON.ArquivoProdutos
+        produtoJSON.itensDownload = (produtoJSON.ArquivoProdutos || [])
           .filter(arq => arq.tipo === 'arquivo')
           .map(arq => ({
             id: arq.id,
             nome: arq.nome,
-            url: (() => {
-              const path = arq.url.replace(/\\/g, '/');
-              return new URL(path, baseUrl).href;
-            })()
+            url: new URL(arq.url.replace(/\\/g, '/'), baseUrl).href
           }));
           
-        // Adiciona o array de vídeos
-        produtoJSON.videos = produtoJSON.ArquivoProdutos
+        produtoJSON.videos = (produtoJSON.ArquivoProdutos || [])
           .filter(arq => arq.tipo === 'video')
           .map(arq => ({
             id: arq.id,
             nome: arq.nome,
-            url: (() => {
-              const path = arq.url.replace(/\\/g, '/');
-              return new URL(path, baseUrl).href;
-            })(),
+            url: new URL(arq.url.replace(/\\/g, '/'), baseUrl).href,
             metadados: arq.metadados
           }));
           
-        // Converter URL de todos os ArquivoProdutos para absoluto
-        produtoJSON.ArquivoProdutos = produtoJSON.ArquivoProdutos.map(arq => {
-          const path = arq.url.replace(/\\/g, '/');
-          return { ...arq, url: new URL(path, baseUrl).href };
+        produtoJSON.ArquivoProdutos = (produtoJSON.ArquivoProdutos || []).map(arq => {
+          return { ...arq, url: new URL(arq.url.replace(/\\/g, '/'), baseUrl).href };
         });
         
         return produtoJSON;
@@ -528,7 +433,47 @@ const produtoService = {
       console.error("Erro detalhado ao listar mais vendidos:", error);
       throw error;
     }
-  }
+  },
+
+  async buscarProdutosRelacionados(idOuSlug, limite = 4) {
+    try {
+      const isNumeric = !isNaN(parseFloat(idOuSlug)) && isFinite(idOuSlug);
+      const whereClause = isNumeric ? { id: idOuSlug } : { slug: idOuSlug };
+
+      const produtoAtual = await Produto.findOne({ where: whereClause });
+      if (!produtoAtual || !produtoAtual.categoriaId) {
+        return [];
+      }
+
+      const relacionados = await Produto.findAll({
+        where: {
+          categoriaId: produtoAtual.categoriaId,
+          id: { [Op.ne]: produtoAtual.id },
+          ativo: true,
+        },
+        limit: parseInt(limite),
+        include: [
+          { model: ArquivoProduto, as: 'ArquivoProdutos', required: false },
+          { model: VariacaoProduto, as: 'variacoes', required: false },
+        ],
+      });
+
+      const baseUrl = process.env.BASE_URL || 'http://localhost:3035';
+      const produtosFormatados = relacionados.map(produto => {
+        const p = produto.toJSON();
+        p.imagens = (p.ArquivoProdutos || [])
+          .filter(arq => arq.tipo === 'imagem')
+          .sort((a, b) => (a.principal ? -1 : 1) - (b.principal ? -1 : 1))
+          .map(arq => new URL(arq.url.replace(/\\/g, '/'), baseUrl).href);
+        return p;
+      });
+
+      return produtosFormatados;
+    } catch (error) {
+      console.error("Erro ao buscar produtos relacionados:", error);
+      throw error;
+    }
+  },
 }
 
-module.exports = produtoService
+module.exports = produtoService;
