@@ -350,29 +350,43 @@ const pedidoService = {
     }
   },
 
+  // FUNÇÃO CORRIGIDA
   async obterDownloadsPorUsuario(usuarioId) {
     try {
-      const pedidos = await Pedido.findAll({
+      const pedidosPagos = await Pedido.findAll({
         where: {
           usuarioId,
-          status: ['pago', 'processando', 'concluido'], // Status que garantem o pagamento
+          status: ['pago', 'concluido'], // Apenas pedidos com pagamento confirmado
         },
-        include: [
-          {
-            model: Produto,
-            as: 'produtos',
-            through: { attributes: [] },
-          },
-        ],
+        attributes: ['itens'], // Pega apenas o campo de itens para otimizar
       });
 
-      // Extrai e achata a lista de produtos digitais de todos os pedidos
-      const downloads = pedidos.flatMap(pedido => pedido.produtos);
-      
-      // Remove duplicatas caso o mesmo produto tenha sido comprado mais de uma vez
-      const uniqueDownloads = Array.from(new Map(downloads.map(item => [item.id, item])).values());
+      const produtosDigitais = new Map();
 
-      return uniqueDownloads;
+      // Itera sobre todos os pedidos e depois sobre os itens de cada pedido
+      for (const pedido of pedidosPagos) {
+        if (pedido.itens && Array.isArray(pedido.itens)) {
+          for (const item of pedido.itens) {
+            // Se o item for digital e ainda não estiver na nossa lista, busca os detalhes dele
+            if (item.digital && !produtosDigitais.has(item.produtoId)) {
+              const produtoComArquivos = await Produto.findByPk(item.produtoId, {
+                include: [{
+                  model: ArquivoProduto,
+                  as: 'ArquivoProdutos', // Garanta que este alias está correto no seu model
+                  where: { tipo: 'arquivo' } // Pega apenas arquivos de download, não imagens
+                }]
+              });
+
+              if (produtoComArquivos) {
+                produtosDigitais.set(item.produtoId, produtoComArquivos);
+              }
+            }
+          }
+        }
+      }
+
+      // Converte o Map de volta para um array de produtos
+      return Array.from(produtosDigitais.values());
     } catch (error) {
       console.error("Erro ao obter downloads do usuário:", error);
       throw new Error("Erro ao buscar seus produtos digitais.");
@@ -380,4 +394,4 @@ const pedidoService = {
   },
 }
 
-module.exports = pedidoService
+module.exports = pedidoService;
