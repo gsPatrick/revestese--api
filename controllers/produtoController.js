@@ -18,7 +18,6 @@ const upload = multer({ storage })
 const produtoController = {
   async criarProduto(req, res, next) {
     try {
-      // Remove preco e estoque se vierem no body
       if (req.body.preco !== undefined) delete req.body.preco;
       if (req.body.estoque !== undefined) delete req.body.estoque;
       const produto = await produtoService.criarProduto(req.body)
@@ -31,7 +30,6 @@ const produtoController = {
   async atualizarProduto(req, res, next) {
     try {
       const { id } = req.params
-      // Remove preco e estoque se vierem no body
       if (req.body.preco !== undefined) delete req.body.preco;
       if (req.body.estoque !== undefined) delete req.body.estoque;
       const produto = await produtoService.atualizarProduto(id, req.body)
@@ -97,14 +95,11 @@ const produtoController = {
     try {
       const { id } = req.params
 
-      // Verificar se o usuário está autenticado
       if (!req.usuario) {
         return res.status(401).json({ erro: "Usuário não autenticado" });
       }
 
       const usuarioId = req.usuario.id
-
-      // Verificar se o usuário comprou o produto
       const comprouProduto = await require("../services/pedidoService").verificarSeUsuarioComprouProduto(usuarioId, id)
 
       if (!comprouProduto) {
@@ -138,24 +133,19 @@ const produtoController = {
     }
   },
 
-  /**
-   * Listar produtos relacionados a um produto
-   */
+  // FUNÇÃO QUE FALTAVA - ADICIONADA AQUI
   async listarProdutosRelacionados(req, res, next) {
     try {
-      const { id } = req.params
-      const { limite = 4 } = req.query
+      const { id } = req.params;
+      const { limite = 4 } = req.query;
 
-      const relacionados = await produtoService.buscarProdutosRelacionados(id, parseInt(limite))
-      res.json(relacionados)
+      const relacionados = await produtoService.buscarProdutosRelacionados(id, parseInt(limite));
+      res.json(relacionados);
     } catch (error) {
-      next(error)
+      next(error);
     }
   },
 
-  /**
-   * Definir produtos relacionados manualmente
-   */
   async definirProdutosRelacionados(req, res, next) {
     try {
       const { id } = req.params
@@ -183,4 +173,4 @@ const produtoController = {
   }
 }
 
-module.exports = produtoController
+module.exports = produtoController;
