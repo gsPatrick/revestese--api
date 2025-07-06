@@ -1,0 +1,26 @@
+# Dependências
+node_modules/
+
+# Arquivos de build
+dist/
+build/
+out/
+
+# Configurações
+config/
+
+# Arquivos de migrações gerados automaticamente
+migrations/
+
+# Uploads
+uploads/
+
+# Arquivos de configuração
+*.config.js
+
+# Outros
+coverage/
+.nyc_output/
+.github/
+.vscode/
+public/ 
