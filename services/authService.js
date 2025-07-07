@@ -4,6 +4,7 @@ const { Usuario } = require("../models")
 const { gerarToken, verificarToken } = require("../utils/jwt")
 const { enviarEmail } = require("../utils/email")
 const crypto = require("crypto")
+const configuracaoLojaService = require("./configuracaoLojaService") // Importe o serviço de configuração
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID)
 
@@ -48,6 +49,50 @@ const authService = {
       }
     } catch (error) {
       throw new Error("Erro na autenticação com Google: " + error.message)
+    }
+  },
+
+  async processarCallbackMelhorEnvio(code) {
+    try {
+      console.log("Processando código de autorização do Melhor Envio...");
+
+      const response = await axios.post(process.env.ME_AUTH_URL, {
+        grant_type: 'authorization_code',
+        client_id: process.env.ME_CLIENT_ID,
+        client_secret: process.env.ME_CLIENT_SECRET,
+        redirect_uri: process.env.ME_REDIRECT_URI,
+        code: code,
+      }, {
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+          'User-Agent': `DoodleDreamsApp (${process.env.ME_CONTACT_EMAIL})`
+        }
+      });
+
+      const { access_token, refresh_token, expires_in } = response.data;
+      
+      if (!access_token || !refresh_token) {
+        throw new Error("Resposta da API do Melhor Envio não contém os tokens necessários.");
+      }
+
+      // Calcula quando o token vai expirar e salva como string ISO
+      const expiresAt = new Date(Date.now() + expires_in * 1000).toISOString();
+
+      // Salva os tokens e a data de expiração no banco de dados usando o serviço de configuração
+      await configuracaoLojaService.atualizarConfiguracoes({
+        ME_ACCESS_TOKEN: access_token,
+        ME_REFRESH_TOKEN: refresh_token,
+        ME_EXPIRES_AT: expiresAt,
+      });
+
+      console.log("Tokens do Melhor Envio obtidos e salvos com sucesso.");
+
+      return { success: true };
+
+    } catch (error) {
+      console.error("Erro CRÍTICO ao processar callback do Melhor Envio:", error.response?.data || error.message);
+      throw new Error("Falha ao obter tokens do Melhor Envio.");
     }
   },
 

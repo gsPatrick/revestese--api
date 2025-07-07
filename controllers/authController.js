@@ -138,6 +138,28 @@ async criarAdmin(req, res, next) {
     }
   },
 
+  async handleMelhorEnvioCallback(req, res, next) {
+    try {
+      const { code } = req.query;
+
+      if (!code) {
+        // Se não houver código, redireciona para uma página de erro no frontend
+        return res.redirect(`${process.env.FRONTEND_URL}/admin/settings/integrations?error=authorization_failed`);
+      }
+
+      await authService.processarCallbackMelhorEnvio(code);
+
+      // Após salvar os tokens, redireciona o usuário para uma página de sucesso no painel admin
+      res.redirect(`${process.env.FRONTEND_URL}/admin/settings/integrations?success=true`);
+
+    } catch (error) {
+      // Em caso de erro, redireciona para a página de erro
+      res.redirect(`${process.env.FRONTEND_URL}/admin/settings/integrations?error=${error.message}`);
+      next(error); // Opcional, para logar o erro no servidor
+    }
+  },
+
+
 
 }
 

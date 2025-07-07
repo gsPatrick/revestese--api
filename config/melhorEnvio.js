@@ -1,74 +1,86 @@
-// config/melhorEnvio.js
-
 const axios = require("axios");
-const dotenv = require("dotenv");
+const { ConfiguracaoLoja } = require("../models");
+const configuracaoLojaService = require("../services/configuracaoLojaService");
+require('dotenv').config();
 
-dotenv.config(); // ESTA LINHA É CRUCIAL E DEVE ESTAR NO TOPO DESTE ARQUIVO
+const API_BASE_URL = process.env.ME_API_URL || "https://melhorenvio.com.br/api/v2";
+const AUTH_URL = process.env.ME_AUTH_URL || "https://melhorenvio.com.br/oauth/token";
 
-// Obtém as credenciais do .env, com valores padrão de sandbox caso não estejam definidas.
-const CLIENT_ID = '6472'
-const CLIENT_SECRET = 'oLVoR0SXwI2azOMzu9nLIuJFGT5IqfYBPdAzaZ1G'
-const CONTACT_EMAIL = process.env.MELHOR_ENVIO_CONTACT_EMAIL || "contato@exemplo.com";
-const USER_AGENT = `Doodle Dreams (${CONTACT_EMAIL})`;
-
-// Variáveis para cache do token (evita múltiplas requisições de token)
-let cachedToken = null;
-let tokenExpiry = 0; // Armazena o timestamp de expiração do token (em milissegundos)
+const CLIENT_ID = process.env.ME_CLIENT_ID;
+const CLIENT_SECRET = process.env.ME_CLIENT_SECRET;
+const REDIRECT_URI = process.env.ME_REDIRECT_URI;
 
 /**
- * Função para obter ou renovar o token de acesso do Melhor Envio.
- * Inclui um mecanismo de cache simples para evitar requisições desnecessárias.
+ * Esta função busca um token válido, atualizando-o se necessário.
  */
-async function getAccessToken() {
-  const now = Date.now();
-  // Se houver um token em cache e ele expirar em mais de 5 minutos, usa o cache
-  if (cachedToken && (tokenExpiry - now) > (5 * 60 * 1000)) { // 5 minutos de buffer
-    return cachedToken;
+async function getValidToken() {
+  const configs = await configuracaoLojaService.obterTodasConfiguracoes();
+  
+  let accessToken = configs.ME_ACCESS_TOKEN;
+  let refreshToken = configs.ME_REFRESH_TOKEN;
+  let expiresAt = configs.ME_EXPIRES_AT ? new Date(configs.ME_EXPIRES_AT) : new Date(0);
+
+  // Se o token ainda é válido (com uma margem de segurança de 5 minutos), retorna-o.
+  if (accessToken && expiresAt > new Date(Date.now() + 5 * 60 * 1000)) {
+    return accessToken;
   }
 
+  // Se o token expirou, usa o refresh_token para obter um novo.
+  if (!refreshToken) {
+    throw new Error("Refresh token do Melhor Envio não encontrado. Configure-o manualmente.");
+  }
+
+  console.log("Token do Melhor Envio expirado. Atualizando...");
+
   try {
-    const response = await axios.post(
-      "https://sandbox.melhorenvio.com.br/oauth/token", // <<-- IMPORTANTE: MUDAR PARA "https://api.melhorenvio.com.br/oauth/token" EM PRODUÇÃO
-      {
-        grant_type: "client_credentials",
-        client_id: CLIENT_ID,
-        client_secret: CLIENT_SECRET,
-        // Inclua os escopos necessários para todas as operações que você planeja realizar
-        scope: "shipping-calculate shipping-checkout", // Escopos comuns para cálculo e compra de frete
-      },
-      {
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "application/json",
-          "User-Agent": USER_AGENT,
-        },
+    const response = await axios.post(AUTH_URL, {
+      grant_type: 'refresh_token',
+      client_id: CLIENT_ID,
+      client_secret: CLIENT_SECRET,
+      refresh_token: refreshToken,
+    }, {
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        // O CABEÇALHO CRUCIAL QUE ESTAVA FALTANDO:
+        'User-Agent': `DoodleDreamsApp (${process.env.ADMIN_EMAIL || 'contato@doodledreams.com.br'})`
       }
-    );
-    cachedToken = response.data.access_token;
-    tokenExpiry = now + (response.data.expires_in * 1000); // Converte segundos para milissegundos
-    return cachedToken;
+    });
+
+    const { access_token, refresh_token, expires_in } = response.data;
+    const newExpiresAt = new Date(Date.now() + expires_in * 1000);
+
+    // Salva os novos tokens e a data de expiração no banco de dados
+    await configuracaoLojaService.atualizarConfiguracoes({
+      ME_ACCESS_TOKEN: access_token,
+      ME_REFRESH_TOKEN: refresh_token,
+      ME_EXPIRES_AT: newExpiresAt.toISOString(),
+    });
+
+    console.log("Token do Melhor Envio atualizado com sucesso.");
+    return access_token;
+
   } catch (error) {
-    console.error("Erro ao obter token do Melhor Envio:", error.response?.data || error.message);
+    console.error("Erro CRÍTICO ao renovar token do Melhor Envio:", error.response?.data || error.message);
     throw new Error("Falha na autenticação com o Melhor Envio");
   }
 }
 
 /**
- * Cria uma instância do Axios configurada para a API do Melhor Envio,
- * incluindo o token de autenticação.
+ * Função principal que cria e retorna uma instância do Axios pré-configurada.
  */
-async function criarMelhorEnvioClient() {
-  const token = await getAccessToken(); // Obtém o token de acesso
+const melhorEnvioClient = async () => {
+  const token = await getValidToken();
 
   return axios.create({
-    baseURL: "https://sandbox.melhorenvio.com.br/api/v2/me", // <<-- IMPORTANTE: MUDAR PARA "https://api.melhorenvio.com.br/api/v2/me" EM PRODUÇÃO
+    baseURL: API_BASE_URL,
     headers: {
-      Authorization: `Bearer ${token}`, // Utiliza o token dinamicamente obtido
-      "Content-Type": "application/json",
-      "Accept": "application/json",
-      "User-Agent": USER_AGENT,
-    },
+      'Accept': 'application/json',
+      'Authorization': `Bearer ${token}`,
+      // O CABEÇALHO CRUCIAL QUE ESTAVA FALTANDO:
+      'User-Agent': `DoodleDreamsApp (${process.env.ADMIN_EMAIL || 'contato@doodledreams.com.br'})`
+    }
   });
-}
+};
 
-module.exports = criarMelhorEnvioClient;
+module.exports = melhorEnvioClient;

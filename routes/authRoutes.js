@@ -10,5 +10,6 @@ router.post("/google", authController.loginComGoogle)
 router.post("/recuperar-senha", authController.recuperarSenha)
 router.post("/alterar-senha", authController.alterarSenha)
 router.post("/create-admin", authController.criarAdmin)
+router.get("/melhor-envio/callback", authController.handleMelhorEnvioCallback)
 
 module.exports = router
