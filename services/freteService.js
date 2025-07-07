@@ -1,4 +1,4 @@
-const melhorEnvioClient = require("../config/melhorEnvioClient");
+const melhorEnvioClient = require("../config/melhorEnvio");
 const { MetodoFrete, Produto, VariacaoProduto } = require("../models");
 
 const freteService = {
