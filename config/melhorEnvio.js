@@ -6,8 +6,8 @@ const dotenv = require("dotenv");
 dotenv.config(); // ESTA LINHA É CRUCIAL E DEVE ESTAR NO TOPO DESTE ARQUIVO
 
 // Obtém as credenciais do .env, com valores padrão de sandbox caso não estejam definidas.
-const CLIENT_ID = process.env.MELHOR_ENVIO_CLIENT_ID || "17746";
-const CLIENT_SECRET = process.env.MELHOR_ENVIO_CLIENT_SECRET || "fft16oWAT17WlgRI5Om6eCkRQnKAkwLp8eLR45mk";
+const CLIENT_ID = '6472'
+const CLIENT_SECRET = 'oLVoR0SXwI2azOMzu9nLIuJFGT5IqfYBPdAzaZ1G'
 const CONTACT_EMAIL = process.env.MELHOR_ENVIO_CONTACT_EMAIL || "contato@exemplo.com";
 const USER_AGENT = `Doodle Dreams (${CONTACT_EMAIL})`;
 
