@@ -7,30 +7,19 @@ require("dotenv").config()
 const pedidoController = {
  async criarPedido(req, res, next) {
     try {
-      // `usuarioId` AGORA SEMPRE VIRÁ DE `req.usuario.id` devido ao middleware `verifyToken`
-      const usuarioId = req.usuario.id;
-      const { itens, cupomCodigo, enderecoEntregaId, freteId } = req.body;
+      const usuarioId = req.usuario.id; // Obtido do middleware verifyToken
+      // Agora extraímos diretamente 'itens', 'cupomCodigo', 'enderecoEntrega', 'freteId'
+      const { itens, cupomCodigo, enderecoEntrega, freteId } = req.body; // <-- Corrigido aqui, esperando objeto enderecoEntrega
 
       if (!itens || itens.length === 0) {
         return res.status(400).json({ erro: "Itens do pedido são obrigatórios" });
       }
 
-      // O `enderecoEntregaId` é o ID de um EnderecoUsuario JÁ CADASTRADO para este `usuarioId`
-      if (!enderecoEntregaId || !freteId) {
-        return res.status(400).json({ erro: "Endereço de entrega e método de frete são obrigatórios" });
-      }
+      // REMOVIDA A VALIDAÇÃO INCORRETA QUE ESPERAVA enderecoEntregaId
+      // A validação de que enderecoEntrega é obrigatório para produtos físicos
+      // e que freteId é necessário será feita DENTRO do pedidoService.criarPedido
 
-      // Obter o endereço completo do banco de dados a partir do ID
-      const { EnderecoUsuario } = require("../models");
-      const enderecoCompleto = await EnderecoUsuario.findOne({
-        where: { id: enderecoEntregaId, usuarioId } // Garante que o endereço pertence ao usuário logado
-      });
-
-      if (!enderecoCompleto) {
-        return res.status(400).json({ erro: "Endereço de entrega não encontrado ou não pertence ao usuário" });
-      }
-
-      // Verificar se todos os produtos são digitais (ainda relevante para o cálculo do frete)
+      // Verificar se todos os produtos são digitais para saber se frete é aplicável
       const { VariacaoProduto } = require("../models");
       const verificacoesDigitais = await Promise.all(itens.map(async (item) => {
         if (item.variacaoId) {
@@ -39,32 +28,55 @@ const pedidoController = {
           });
           return variacao?.digital || false;
         }
-        return false;
+        // Suponha que produtos sem variação não são digitais, a menos que haja outro campo 'digital' no Produto
+        // No seu modelo Produto, não há flag digital, então assume-se físico.
+        // Se houver produtos digitais sem variação, essa lógica precisa ser ajustada.
+        return false; 
       }));
       const todosDigitais = verificacoesDigitais.every(isDigital => isDigital);
 
-      // Validar cupom se fornecido
+      // Se NÃO for totalmente digital, freteId e enderecoEntrega devem estar presentes.
+      // Vamos mover essa validação para CÁ, antes de chamar o service, para dar um erro mais específico.
+      if (!todosDigitais) {
+          if (!enderecoEntrega) {
+              return res.status(400).json({ erro: "Endereço de entrega é obrigatório para produtos físicos." });
+          }
+           if (!freteId) {
+              return res.status(400).json({ erro: "Método de frete é obrigatório para produtos físicos." });
+           }
+      }
+
+
+      // Validar cupom se fornecido (mantido)
       if (cupomCodigo) {
         try {
           await cupomService.validarCupom(cupomCodigo);
         } catch (error) {
-          return res.status(400).json({ erro: error.message });
+          return res.status(400).json({ erro: "Cupom inválido: " + error.message }); // Mensagem mais específica
         }
       }
 
       // Criar pedido com todas as informações
       const resultado = await pedidoService.criarPedido(
-        usuarioId,
-        itens, // Itens vêm direto do body
-        enderecoCompleto.toJSON(), // Objeto completo de endereço
-        todosDigitais ? null : freteId, // Frete ID, null se todos forem digitais
+        usuarioId, // Usuario ID do token
+        itens, // Itens do body
+        enderecoEntrega, // Objeto completo de endereço DO BODY
+        todosDigitais ? null : freteId, // Frete ID do body (null se digital)
         cupomCodigo
       );
 
       res.status(201).json(resultado);
     } catch (error) {
-      console.log(error);
-      next(error);
+      console.error("Erro no controlador criarPedido:", error); // Log mais detalhado
+      // Se o erro veio do service (como "Estoque insuficiente"), lance-o
+      if (error.message.includes("Estoque insuficiente")) {
+           return res.status(400).json({ erro: error.message });
+      }
+       if (error.message.includes("não encontrado")) { // Erros como Produto não encontrado
+           return res.status(404).json({ erro: error.message });
+      }
+      // Para outros erros inesperados, retorne 500
+      next(error); // Passa para o middleware de tratamento de erros padrão
     }
   },
 
