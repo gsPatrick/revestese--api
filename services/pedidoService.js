@@ -3,6 +3,7 @@ const { enviarEmail, templateConfirmacaoPedido } = require("../utils/email")
 const cupomService = require("./cupomService")
 const notificacaoService = require("./notificacaoService")
 const pagamentoService = require("./pagamentoService")
+const { Op } = require('sequelize');
 
 const pedidoService = {
  async criarPedido(usuarioId, itensPedido, enderecoEntrega, freteId, cupomCodigo = null) {
