@@ -105,7 +105,7 @@ async function iniciarServidor() {
     console.log("Conexão com banco de dados estabelecida.")
 
     try {
-await sequelize.sync({ force: true })
+      await sequelize.sync()
       console.log("Modelos sincronizados com o banco de dados.")
     } catch (syncError) {
       console.error("Erro ao sincronizar modelos:", syncError)
