@@ -36,7 +36,7 @@ const correiosService = {
         },
         {
           headers: {
-            Authorization: '085C9935RA315R45F8RB755RB94B3584E3DE',
+            Authorization: 'Token 085C9935RA315R45F8RB755RB94B3584E3DE',
             'Content-Type': 'application/json'
           }
         }
