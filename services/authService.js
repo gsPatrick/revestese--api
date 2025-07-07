@@ -220,6 +220,41 @@ const authService = {
       throw error;
     }
   },
+
+   async criarUsuarioAdmin(dados) {
+    try {
+      const { nome, email, senha } = dados;
+
+      const usuarioExistente = await Usuario.findOne({ where: { email } });
+      if (usuarioExistente) {
+        throw new Error("Email já cadastrado");
+      }
+
+      const senhaHash = await bcrypt.hash(senha, 10);
+
+      // A principal diferença: cria o usuário com tipo 'admin' e ativo
+      const admin = await Usuario.create({
+        nome,
+        email,
+        senhaHash,
+        tipo: "admin", // Define o tipo como admin
+        ativo: true,
+      });
+      
+      // Retorna o objeto do admin sem a senha
+      const adminData = admin.toJSON();
+      delete adminData.senhaHash;
+      
+      return adminData;
+
+    } catch (error) {
+      throw error;
+    }
+  },
+
+
 };
+
+
 
 module.exports = authService;
