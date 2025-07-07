@@ -351,9 +351,8 @@ const pedidoService = {
   },
 
   // FUNÇÃO CORRIGIDA
-  async obterDownloadsPorUsuario(usuarioId) {
+async obterDownloadsPorUsuario(usuarioId) {
     try {
-      // 1. Buscar todos os itens digitais de pedidos pagos/concluídos
       const pedidos = await Pedido.findAll({
         where: {
           usuarioId,
@@ -367,8 +366,7 @@ const pedidoService = {
       for (const pedido of pedidos) {
         if (pedido.itens && Array.isArray(pedido.itens)) {
           for (const item of pedido.itens) {
-             // Assume que a flag digital está no item do pedido
-            if (item.digital) {
+            if (item.digital) { // Assume que a flag digital está no item do pedido
                  uniqueDigitalProductIds.add(item.produtoId);
             }
           }
@@ -379,74 +377,84 @@ const pedidoService = {
           return [];
       }
 
-      // 2. Buscar os detalhes dos PRODUTOS digitais únicos, incluindo imagens e itensDownload (como JSON)
-      // Agora a query busca o slug que foi adicionado ao modelo
-      const produtosDigitais = await Produto.findAll({
+      // 2. Buscar os detalhes dos PRODUTOS digitais únicos, INCLUINDO SEUS ARQUIVOS DIGITAIS E IMAGEM PRINCIPAL via associação
+      const baseUrl = process.env.BASE_URL || 'http://localhost:3035';
+
+      const produtosDigitaisComArquivos = await Produto.findAll({
         where: {
-          id: { [require("sequelize").Op.in]: Array.from(uniqueDigitalProductIds) },
-          ativo: true, // Apenas produtos ativos
-          // Opcional: Se tiver flag digital no Produto, adicione aqui: digital: true
+          id: { [Op.in]: Array.from(uniqueDigitalProductIds) },
+          ativo: true, 
         },
-        // NÃO incluir ArquivoProduto aqui, pois o frontend espera JSON properties
+        include: [{
+          model: ArquivoProduto,
+          as: 'ArquivoProdutos',
+          // Inclui arquivos digitais E imagem principal
+          where: { 
+              [Op.or]: [
+                  { tipo: 'arquivo' }, 
+                  { tipo: 'imagem', principal: true } // Incluir a imagem principal
+              ]
+          }, 
+          required: false // Não exige que o produto tenha arquivos (pode ter só a imagem principal)
+        }],
         attributes: [
             'id', 
             'nome', 
-            'slug', // <-- Buscar o slug
+            'slug', 
             'descricao', 
-            'imagens', // <-- Buscar a propriedade JSON 'imagens'
-            'itensDownload', // <-- Buscar a propriedade JSON 'itensDownload'
-            // Incluir outros atributos necessários como peso, dimensoes, digital (se aplicável)
-            'peso', 'largura', 'altura', 'comprimento', /* 'digital' */
+            // Não precisamos mais buscar 'imagens' ou 'itensDownload' como JSON aqui
         ], 
       });
 
       // 3. Formatar os dados para o frontend
-      const baseUrl = process.env.BASE_URL || 'http://localhost:3035';
-
-      const downloadsFormatados = produtosDigitais.map(produto => {
+      const downloadsFormatados = produtosDigitaisComArquivos.map(produto => {
         const produtoJSON = produto.toJSON();
+        const arquivosDoProduto = produtoJSON.ArquivoProdutos || [];
 
-        // Formatar a imagem principal (lendo do array JSON 'imagens')
-        // Assumimos que o array 'imagens' JSON contém URLs ou caminhos relativos
-        const imagemUrl = produtoJSON.imagens?.[0] || 'https://placehold.co/80x80.png'; 
-        
-        // Formatar os arquivos digitais (lendo do array JSON 'itensDownload')
-        // Assumimos que o array 'itensDownload' JSON contém objetos com { id, nome, url } ou apenas { url }
-        const arquivosDigitais = (produtoJSON.itensDownload || []).map(item => ({
-             id: item.id || null, // Pode não ter ID se salvo só a URL
-             nome: item.nome || item.url.split('/').pop(), // Tenta pegar nome ou usa parte da URL
-             url: item.url, // Caminho relativo /uploads/... ou URL completa
-             fullUrl: item.fullUrl || new URL(item.url.replace(/\\/g, '/'), baseUrl).href, // Garante URL completa
-             // mimeType e tamanho não estão no JSON original, teriam que ser buscados de outra forma se necessários aqui
-        }));
+        // Encontra a imagem principal (que veio na include, se existir)
+        const imagemPrincipal = arquivosDoProduto.find(arq => arq.tipo === 'imagem' && arq.principal);
+        // Formata a URL da imagem principal
+        const imagemUrl = imagemPrincipal?.url ? new URL(imagemPrincipal.url.replace(/\\/g, '/'), baseUrl).href : 'https://placehold.co/80x80.png';
 
+        // Filtra e formata APENAS os arquivos digitais para a lista de downloads
+        const arquivosDigitaisFormatados = arquivosDoProduto
+          .filter(arq => arq.tipo === 'arquivo')
+          .map(arq => ({
+            id: arq.id,
+            nome: arq.nome,
+            url: arq.url, // Caminho relativo /uploads/...
+            fullUrl: new URL(arq.url.replace(/\\/g, '/'), baseUrl).href, // URL completa para download
+            mimeType: arq.mimeType,
+            tamanho: arq.tamanho,
+          }));
 
         return {
           produtoId: produtoJSON.id,
           nome: produtoJSON.nome, 
-          slug: produtoJSON.slug, // <-- Incluir o slug formatado
+          slug: produtoJSON.slug, 
           descricao: produtoJSON.descricao,
-          imagemUrl: new URL(imagemUrl.replace(/\\/g, '/'), baseUrl).href, // Garante que a imagemUrl seja completa
-          arquivos: arquivosDigitais, // Lista de arquivos digitais formatada
-          // Incluir outros dados do produto se necessário
-          peso: produtoJSON.peso,
-          largura: produtoJSON.largura,
-          altura: produtoJSON.altura,
-          comprimento: produtoJSON.comprimento,
-          // digital: produtoJSON.digital, // Se existir no modelo
+          imagemUrl: imagemUrl, // URL completa da imagem principal
+          arquivos: arquivosDigitaisFormatados, // Lista de arquivos digitais formatada
         };
       });
 
-      return downloadsFormatados;
+      // Opcional: Filtrar resultados para remover produtos que não tinham arquivos digitais tipo 'arquivo'
+      // (se required: false e um produto só tinha a imagem principal, ele virá mas sem arquivos digitais)
+       const downloadsComArquivosReais = downloadsFormatados.filter(item => item.arquivos.length > 0);
+
+
+      // Retorna a lista final com nome, slug, imagem e arquivos
+      return downloadsComArquivosReais;
 
     } catch (error) {
       console.error("Erro ao obter downloads do usuário:", error);
-      // Lança o erro com a mensagem original para o controlador
-      // Se o erro for do Sequelize e tiver detalhes SQL, pode ser mais útil
       if (error.original?.sqlMessage) {
            console.error("Detalhes do erro SQL:", error.original.sqlMessage, error.sql);
-      }
-      throw new Error("Erro ao buscar seus produtos digitais."); // Mensagem genérica para o front-end
+       }
+       if (error.original?.code === 'ER_BAD_FIELD_ERROR') {
+            throw new Error("Erro na estrutura do banco de dados. A coluna 'slug' pode estar faltando na tabela 'produtos'.");
+       }
+      throw error;
     }
   },
   // ... (outras funções) ...
