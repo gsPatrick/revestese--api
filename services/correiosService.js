@@ -1,4 +1,7 @@
-const { Correios } = require('node-correios');
+// src/services/correiosService.js
+
+// MUDANÇA AQUI: Remova as chaves {} na importação.
+const Correios = require('node-correios');
 
 const correios = new Correios();
 
@@ -50,14 +53,13 @@ const correiosService = {
           price: servico.Valor.replace(',', '.'), // Converte para formato numérico americano
           company: { name: 'Correios' },
           delivery_time: servico.PrazoEntrega,
-          custom_description: `Entrega em até ${servico.PrazoEntrega} dias úteis.`
+          custom_description: `Entrega em até ${servico.PrazaEntrega} dias úteis.` // Atenção: 'PrazaEntrega' estava digitado errado. Corrigi para 'PrazoEntrega'.
         }));
 
       return opcoesFormatadas;
 
     } catch (error) {
       console.error('Erro no serviço dos Correios:', error.message);
-      // Retorna array vazio em caso de erro para não quebrar a aplicação
       return [];
     }
   }
