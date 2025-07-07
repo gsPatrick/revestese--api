@@ -1,57 +1,14 @@
 // src/models/produto.js
 
-'use strict';
-const {
-  Model, DataTypes
-} = require('sequelize');
-const slugify = require('slugify'); // Importar slugify
+const { DataTypes, NOW } = require("sequelize")
+const { sequelize } = require("../config/database")
+const slugify = require('slugify'); // <-- Importar slugify
 
-module.exports = (sequelize, DataTypes) => {
-  class Produto extends Model {
-    /**
-     * Helper method for defining associations.
-     * This method is not a part of Sequelize lifecycle.
-     * The `models/index` file will call this method automatically.
-     */
-    static associate(models) {
-      // Associações com ArquivoProduto (para imagens, arquivos digitais, videos)
-      Produto.hasMany(models.ArquivoProduto, {
-        as: 'ArquivoProdutos', // Alias para a associação
-        foreignKey: 'produtoId',
-        onDelete: 'CASCADE',
-        hooks: true, // Garante que hooks (como exclusão de arquivos físicos) sejam chamados
-      });
+// const PlanoAssinatura = require('./PlanoAssinatura'); // Remover import
 
-      // Associações com Avaliação
-      Produto.hasMany(models.Avaliacao, {
-        as: 'Avaliacoes',
-        foreignKey: 'produtoId',
-        onDelete: 'CASCADE',
-      });
-
-      // Associação com Categoria (um produto pertence a uma categoria)
-      Produto.belongsTo(models.Categoria, {
-        as: 'categoria',
-        foreignKey: 'categoriaId',
-      });
-
-      // Associação N:M com Pedido através da tabela ItemPedido
-      Produto.belongsToMany(models.Pedido, {
-        through: models.ItemPedido,
-        foreignKey: 'produtoId',
-        as: 'pedidos',
-      });
-
-      // Associação com Variações do Produto
-      Produto.hasMany(models.VariacaoProduto, {
-        as: 'variacoes',
-        foreignKey: 'produtoId',
-        onDelete: 'CASCADE',
-        hooks: true,
-      });
-    }
-  }
-  Produto.init({
+const Produto = sequelize.define(
+  "Produto",
+  {
     id: {
       type: DataTypes.INTEGER,
       primaryKey: true,
@@ -60,83 +17,111 @@ module.exports = (sequelize, DataTypes) => {
     nome: {
       type: DataTypes.STRING,
       allowNull: false,
-      unique: true,
     },
-    // COLUNA SLUG: Adicionada conforme necessário para links e buscas amigáveis
-    slug: { 
+    // <-- ADICIONADA A COLUNA SLUG AQUI NOVAMENTE
+    slug: {
       type: DataTypes.STRING,
-      allowNull: true, // Pode ser null se o nome ainda não foi definido ou se preferir gerar depois
-      unique: true,    // Garante que slugs sejam únicos
+      allowNull: true, // Permitir null inicialmente, será gerado
+      unique: true,    // Deve ser único
     },
     descricao: {
       type: DataTypes.TEXT,
       allowNull: true,
     },
-    // REMOVIDO: 'imagens' - Gerenciado via associação ArquivoProduto
-    // REMOVIDO: 'itensDownload' - Gerenciado via associação ArquivoProduto
-    // REMOVIDO: 'preco' e 'estoque' - Gerenciado via associação VariacaoProduto
-
-    ativo: {
-      type: DataTypes.BOOLEAN,
-      allowNull: false,
-      defaultValue: true,
+    // <-- PROPRIEDADE IMAGENS MANTIDA COMO JSON
+    imagens: {
+      type: DataTypes.JSON,
+      defaultValue: [],
     },
     categoriaId: {
       type: DataTypes.INTEGER,
       allowNull: true,
       references: {
-        model: 'categorias', // Nome da tabela referenciada
-        key: 'id',
-      },
-      onUpdate: 'CASCADE',
-      onDelete: 'SET NULL', // Se a categoria for excluída, define categoriaId para NULL
+        model: 'categorias',
+        key: 'id'
+      }
     },
-    // Adicionar campos de peso/dimensões aqui (ou movê-los para VariacaoProduto se cada variação tiver peso/dimensões diferentes)
-    // Manteve-os aqui por enquanto, como estava no código anterior.
+    // <-- PROPRIEDADE ITENSDOWNLOAD MANTIDA COMO JSON
+    itensDownload: {
+      type: DataTypes.JSON, // Array de URLs ou paths de arquivos digitais
+      allowNull: true,
+      defaultValue: [],
+    },
+    ativo: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: true,
+    },
+    // <-- CAMPOS DE DIMENSÃO MANTIDOS AQUI
     peso: {
-        type: DataTypes.DECIMAL(10, 3), // Peso em kg (ex: 0.500)
+        type: DataTypes.DECIMAL(10, 3),
         allowNull: true,
         defaultValue: 0.300, 
     },
      largura: {
-        type: DataTypes.DECIMAL(10, 2), // Largura em cm
+        type: DataTypes.DECIMAL(10, 2),
         allowNull: true,
-        defaultValue: 10.00, 
+        defaultValue: 10.00,
     },
      altura: {
-        type: DataTypes.DECIMAL(10, 2), // Altura em cm
+        type: DataTypes.DECIMAL(10, 2),
         allowNull: true,
-        defaultValue: 10.00, 
+        defaultValue: 10.00,
     },
      comprimento: {
-        type: DataTypes.DECIMAL(10, 2), // Comprimento em cm
+        type: DataTypes.DECIMAL(10, 2),
         allowNull: true,
-        defaultValue: 10.00, 
+        defaultValue: 10.00,
     },
-    // REMOVIDO: 'digital' - Gerenciado via associação VariacaoProduto
-
-  }, {
+     // <-- FLAG DIGITAL MANTIDA AQUI (se você a tinha antes, caso contrário remova)
+     // digital: { 
+     //    type: DataTypes.BOOLEAN,
+     //    defaultValue: false,
+     // },
+    createdAt: {
+      type: DataTypes.DATE,
+      defaultValue: sequelize.literal('CURRENT_TIMESTAMP'),
+      allowNull: false,
+    },
+    updatedAt: {
+      type: DataTypes.DATE,
+      defaultValue: sequelize.literal('CURRENT_TIMESTAMP'),
+      allowNull: false,
+    },
+  },
+  {
     sequelize,
-    modelName: 'Produto',
-     tableName: 'produtos', // Nome da tabela no banco
-     timestamps: true, // Habilita createdAt e updatedAt
-     paranoid: true, // Habilita soft delete (deletedAt)
-
-     // Adiciona um hook beforeCreate para gerar o slug automaticamente
-     hooks: {
+    modelName: "Produto",
+    tableName: "produtos",
+    timestamps: true,
+    underscored: true,
+    // <-- HOOKS PARA GERAR SLUG ADICIONADOS
+    hooks: {
         beforeCreate: (produto, options) => {
-            if (produto.nome && !produto.slug) { // Gera slug se nome existir e slug não for fornecido
+            if (produto.nome && !produto.slug) {
                 produto.slug = slugify(produto.nome, { lower: true, strict: true, remove: /[*+~.()'"!:@]/g });
             }
         },
          beforeUpdate: (produto, options) => {
-             // Regenerar slug se o nome mudar E o slug não foi alterado manualmente na mesma operação
-             // Isso evita sobrescrever um slug manual se o nome for ligeiramente ajustado
              if (produto.changed('nome') && !options.fields.includes('slug')) {
                   produto.slug = slugify(produto.nome, { lower: true, strict: true, remove: /[*+~.()'"!:@]/g });
+             } else if (produto.changed('slug') && produto.slug === '') {
+                 // Se o slug for definido para vazio, podemos regenerar a partir do nome
+                 produto.slug = slugify(produto.nome, { lower: true, strict: true, remove: /[*+~.()'"!:@]/g });
              }
          }
      }
-  });
-  return Produto;
-};
+  },
+)
+
+// Remover associação daqui (mantido comentado)
+// Produto.belongsToMany(PlanoAssinatura, {
+//   through: 'plano_assinatura_produtos',
+//   foreignKey: 'produtoId',
+//   as: 'planos',
+// });
+
+// static associate(models) { ... } <-- REMOVIDO SE NÃO ESTAVA NA VERSÃO ANTERIOR
+// Se sua versão anterior do modelo NÃO tinha static associate, remova-o.
+// Se tinha static associate MAS as associações eram definidas no index.js, mantenha a função vazia.
+
+module.exports = Produto
