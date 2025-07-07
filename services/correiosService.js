@@ -1,15 +1,13 @@
-// src/services/correiosService.js
+// src/services/correiosService.js - atualizado para usar Frenet
 
-const Correios = require('node-correios');
-
-const correios = new Correios();
+const axios = require('axios');
 
 const correiosService = {
   async calcularFreteCorreios(args) {
     try {
-      console.log('--- INÍCIO CÁLCULO CORREIOS SERVICE ---');
-      console.log('Argumentos recebidos para cálculo Correios:', JSON.stringify(args, null, 2));
-      
+      console.log('--- INÍCIO CÁLCULO CORREIOS (via Frenet) ---');
+      console.log('Argumentos recebidos:', JSON.stringify(args, null, 2));
+
       const {
         sCepOrigem,
         sCepDestino,
@@ -19,53 +17,51 @@ const correiosService = {
         nVlLargura,
         nVlValorDeclarado
       } = args;
-      
-      const servicos = ['04510', '04014']; // 04510 = PAC, 04014 = SEDEX
 
-      const payloadCorreios = { // Adicionei esta variável para logar o payload exato
-        nCdServico: servicos,
-        sCepOrigem,
-        sCepDestino,
-        nVlPeso: String(nVlPeso),
-        nCdFormato: 1, // 1 = formato caixa/pacote
-        nVlComprimento: String(nVlComprimento),
-        nVlAltura: String(nVlAltura),
-        nVlLargura: String(nVlLargura),
-        nVlDiametro: '0',
-        sCdMaoPropria: 'N',
-        nVlValorDeclarado: String(nVlValorDeclarado),
-        sCdAvisoRecebimento: 'N',
-      };
+      const response = await axios.post(
+        'https://api.frenet.com.br/shipping/quote',
+        {
+          SellerCEP: sCepOrigem,
+          RecipientCEP: sCepDestino,
+          ShipmentInvoiceValue: Number(nVlValorDeclarado),
+          ShippingServiceCode: '', // Deixe vazio para trazer todos (Correios PAC e SEDEX aparecerão)
+          Package: [
+            {
+              Weight: Number(nVlPeso),
+              Length: Number(nVlComprimento),
+              Height: Number(nVlAltura),
+              Width: Number(nVlLargura)
+            }
+          ]
+        },
+        {
+          headers: {
+            Authorization: '085C9935RA315R45F8RB755RB94B3584E3DE',
+            'Content-Type': 'application/json'
+          }
+        }
+      );
 
-      console.log('Payload enviado para a API dos Correios:', JSON.stringify(payloadCorreios, null, 2));
+      console.log('Resposta BRUTA da Frenet:', JSON.stringify(response.data, null, 2));
 
-      const resultado = await correios.calcPrecoPrazo(payloadCorreios); // Usando o payload logado
-      
-      console.log('Resposta BRUTA da API dos Correios:', JSON.stringify(resultado, null, 2));
-
-      // Importante: Verifique se a resposta contém `MsgErro`
-      const opcoesFormatadas = resultado
-        .filter(servico => servico.Valor && servico.Valor !== '0,00' && servico.MsgErro === '') // Filtra por serviços válidos e sem erro
+      const opcoesFormatadas = (response.data.ShippingSevicesArray || [])
+        .filter(s => s.ShippingPrice > 0)
         .map(servico => ({
-          id: servico.Codigo,
-          name: servico.Codigo === '04510' ? 'Correios PAC' : 'Correios SEDEX',
-          price: servico.Valor.replace(',', '.'),
-          company: { name: 'Correios' },
-          delivery_time: servico.PrazoEntrega,
-          custom_description: `Entrega em até ${servico.PrazoEntrega} dias úteis.`,
-          // Adicionado para debug:
-          erroCorreios: servico.MsgErro,
-          observacaoCorreios: servico.ObsFim,
+          id: servico.ServiceCode,
+          name: servico.ServiceDescription,
+          price: Number(servico.ShippingPrice).toFixed(2),
+          company: { name: servico.Carrier || 'Correios' },
+          delivery_time: servico.DeliveryTime,
+          custom_description: `Entrega em até ${servico.DeliveryTime} dias úteis.`,
         }));
-      
-      console.log('Opções de frete FORMATADAS pelo Correios Service:', JSON.stringify(opcoesFormatadas, null, 2));
-      console.log('--- FIM CÁLCULO CORREIOS SERVICE ---');
+
+      console.log('Opções FORMATADAS:', JSON.stringify(opcoesFormatadas, null, 2));
+      console.log('--- FIM CÁLCULO CORREIOS (via Frenet) ---');
 
       return opcoesFormatadas;
-
     } catch (error) {
-      console.error('ERRO no serviço dos Correios:', error.message);
-      console.error('Detalhes do erro do Correios Service:', error.stack); // Mostra o stack trace completo
+      console.error('ERRO na requisição Frenet:', error.message);
+      console.error(error.stack);
       return [];
     }
   }
