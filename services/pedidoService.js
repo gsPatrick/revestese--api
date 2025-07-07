@@ -351,42 +351,88 @@ const pedidoService = {
   },
 
   // FUNÇÃO CORRIGIDA
-  async obterDownloadsPorUsuario(usuarioId) {
+ async obterDownloadsPorUsuario(usuarioId) {
     try {
-      const pedidosPagos = await Pedido.findAll({
+      // 1. Buscar todos os itens digitais de pedidos pagos/concluídos
+      const pedidos = await Pedido.findAll({
         where: {
           usuarioId,
-          status: ['pago', 'concluido'], // Apenas pedidos com pagamento confirmado
+          status: ['pago', 'processando', 'enviado', 'entregue', 'concluido'],
         },
-        attributes: ['itens'], // Pega apenas o campo de itens para otimizar
+        attributes: ['itens'],
       });
 
-      const produtosDigitais = new Map();
+      const uniqueDigitalProductIds = new Set(); // Usar um Set para armazenar IDs de produtos digitais únicos
 
-      // Itera sobre todos os pedidos e depois sobre os itens de cada pedido
-      for (const pedido of pedidosPagos) {
+      for (const pedido of pedidos) {
         if (pedido.itens && Array.isArray(pedido.itens)) {
           for (const item of pedido.itens) {
-            // Se o item for digital e ainda não estiver na nossa lista, busca os detalhes dele
-            if (item.digital && !produtosDigitais.has(item.produtoId)) {
-              const produtoComArquivos = await Produto.findByPk(item.produtoId, {
-                include: [{
-                  model: ArquivoProduto,
-                  as: 'ArquivoProdutos', // Garanta que este alias está correto no seu model
-                  where: { tipo: 'arquivo' } // Pega apenas arquivos de download, não imagens
-                }]
-              });
-
-              if (produtoComArquivos) {
-                produtosDigitais.set(item.produtoId, produtoComArquivos);
-              }
+            if (item.digital) {
+                 // Adiciona o ID do produto base ao Set
+                 uniqueDigitalProductIds.add(item.produtoId);
             }
           }
         }
       }
 
-      // Converte o Map de volta para um array de produtos
-      return Array.from(produtosDigitais.values());
+      if (uniqueDigitalProductIds.size === 0) {
+          return []; // Retorna array vazio se nenhum produto digital foi comprado
+      }
+
+      // 2. Buscar os detalhes dos PRODUTOS digitais únicos, incluindo TODOS os ArquivoProdutos relevantes
+      const baseUrl = process.env.BASE_URL || 'http://localhost:3035';
+
+      const produtosDigitaisComArquivos = await Produto.findAll({
+        where: {
+          id: { [require("sequelize").Op.in]: Array.from(uniqueDigitalProductIds) },
+          // Opcional: Adicionar where para garantir que o produto ainda esteja ativo, etc.
+        },
+        include: [{
+          model: ArquivoProduto,
+          as: 'ArquivoProdutos',
+          // Inclui todos os arquivos associados (imagens e arquivos digitais)
+          // O filtro por tipo 'arquivo' será feito na formatação
+        }],
+        attributes: ['id', 'nome', 'slug', 'descricao'], // Atributos básicos do produto
+      });
+
+      // 3. Formatar os dados para o frontend
+      const downloadsFormatados = produtosDigitaisComArquivos.map(produto => {
+        const arquivosDoProduto = produto.ArquivoProdutos || [];
+
+        // Encontra a imagem principal
+        const imagemPrincipal = arquivosDoProduto.find(arq => arq.tipo === 'imagem' && arq.principal);
+        // Se não encontrar a principal, pega a primeira imagem que encontrar
+        const fallbackImagem = arquivosDoProduto.find(arq => arq.tipo === 'imagem');
+        const imagemUrl = imagemPrincipal?.url || fallbackImagem?.url || 'https://placehold.co/80x80.png'; // Use .url ou .fullUrl
+
+        // Filtra e formata os arquivos digitais
+        const arquivosDigitais = arquivosDoProduto
+          .filter(arq => arq.tipo === 'arquivo')
+          .map(arq => ({
+            id: arq.id,
+            nome: arq.nome,
+            url: arq.url, // Caminho relativo /uploads/...
+            fullUrl: new URL(arq.url, baseUrl).href, // URL completa para download
+            mimeType: arq.mimeType,
+            tamanho: arq.tamanho,
+          }));
+
+        return {
+          produtoId: produto.id,
+          nome: produto.nome, // Nome do produto base
+          slug: produto.slug,
+          descricao: produto.descricao, // Adicionar descrição se útil
+          imagemUrl: new URL(imagemUrl, baseUrl).href, // Garante que a imagemUrl também seja completa
+          arquivos: arquivosDigitais, // Lista de arquivos digitais para download
+          // Opcional: Se quiser a variação específica que o usuário comprou,
+          // seria necessário refazer a lógica de agrupamento inicial para rastrear variações.
+          // Por enquanto, listamos o produto base e todos os seus arquivos digitais.
+        };
+      });
+
+      return downloadsFormatados;
+
     } catch (error) {
       console.error("Erro ao obter downloads do usuário:", error);
       throw new Error("Erro ao buscar seus produtos digitais.");
