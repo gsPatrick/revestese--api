@@ -1,11 +1,9 @@
-// src/services/correiosService.js - atualizado para usar Frenet
-
 const axios = require('axios');
 
 const correiosService = {
   async calcularFreteCorreios(args) {
     try {
-      console.log('--- INÍCIO CÁLCULO CORREIOS (via Frenet) ---');
+      console.log('--- INÍCIO CÁLCULO CORREIOS (via Frenet REST v1) ---');
       console.log('Argumentos recebidos:', JSON.stringify(args, null, 2));
 
       const {
@@ -24,20 +22,25 @@ const correiosService = {
           SellerCEP: sCepOrigem,
           RecipientCEP: sCepDestino,
           ShipmentInvoiceValue: Number(nVlValorDeclarado),
-          ShippingServiceCode: '', // Deixe vazio para trazer todos (Correios PAC e SEDEX aparecerão)
-          Package: [
+          ShippingServiceCode: null,
+          RecipientCountry: 'BR',
+          ShippingItemArray: [
             {
-              Weight: Number(nVlPeso),
-              Length: Number(nVlComprimento),
               Height: Number(nVlAltura),
-              Width: Number(nVlLargura)
+              Length: Number(nVlComprimento),
+              Width: Number(nVlLargura),
+              Weight: Number(nVlPeso),
+              Quantity: 1,
+              SKU: "frete_auto",
+              Category: "Geral"
             }
           ]
         },
         {
           headers: {
-            Authorization: 'Token 085C9935RA315R45F8RB755RB94B3584E3DE',
-            'Content-Type': 'application/json'
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+            'token': '085C9935RA315R45F8RB755RB94B3584E3DE' // <-- seu token direto aqui
           }
         }
       );
@@ -45,7 +48,7 @@ const correiosService = {
       console.log('Resposta BRUTA da Frenet:', JSON.stringify(response.data, null, 2));
 
       const opcoesFormatadas = (response.data.ShippingSevicesArray || [])
-        .filter(s => s.ShippingPrice > 0)
+        .filter(s => !s.Error && Number(s.ShippingPrice) > 0)
         .map(servico => ({
           id: servico.ServiceCode,
           name: servico.ServiceDescription,
@@ -56,9 +59,10 @@ const correiosService = {
         }));
 
       console.log('Opções FORMATADAS:', JSON.stringify(opcoesFormatadas, null, 2));
-      console.log('--- FIM CÁLCULO CORREIOS (via Frenet) ---');
+      console.log('--- FIM CÁLCULO CORREIOS (via Frenet REST v1) ---');
 
       return opcoesFormatadas;
+
     } catch (error) {
       console.error('ERRO na requisição Frenet:', error.message);
       console.error(error.stack);
