@@ -1,6 +1,9 @@
+// src/models/PlanoAssinatura.js
+
 const { DataTypes } = require('sequelize');
 const { sequelize } = require('../config/database');
-// const Produto = require('./Produto'); // Remover import
+// const Produto = require('./Produto'); // Remover import se não for usado
+// const AssinaturaUsuario = require('./AssinaturaUsuario'); // Remover import se não for usado
 
 const PlanoAssinatura = sequelize.define(
   'PlanoAssinatura',
@@ -18,8 +21,13 @@ const PlanoAssinatura = sequelize.define(
       type: DataTypes.TEXT,
       allowNull: true,
     },
-    planoId: {
-      type: DataTypes.UUID
+    // O campo planoId parece ser redundante aqui, já que o próprio modelo TEM um ID
+    // A foreign key 'planoId' em AssinaturaUsuario aponta para o ID deste modelo.
+    // A menos que este campo 'planoId' tenha outro propósito específico (ex: ID de um plano externo),
+    // ele pode ser removido. Vou mantê-lo por enquanto, mas é algo a revisar.
+    planoId: { // <-- Possível campo redundante?
+      type: DataTypes.UUID,
+       allowNull: true // Manter allowNull true conforme seu código
     },
     preco: {
       type: DataTypes.DECIMAL(10, 2),
@@ -44,13 +52,8 @@ const PlanoAssinatura = sequelize.define(
   },
 )
 
-// Remover associação daqui
-// PlanoAssinatura.belongsToMany(Produto, {
-//   through: 'plano_assinatura_produtos',
-//   foreignKey: 'planoId',
-//   as: 'produtos',
-// });
-
-// A associação com AssinaturaUsuario será adicionada depois que o modelo for criado.
+// REMOVIDAS AS ASSOCIAÇÕES DAQUI:
+// PlanoAssinatura.belongsToMany(Produto, { ... });
+// A associação com AssinaturaUsuario será adicionada em index.js
 
 module.exports = PlanoAssinatura;
