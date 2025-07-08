@@ -1,11 +1,9 @@
 const express = require("express")
 const freteController = require("../controllers/freteController")
-const autenticar = require("../middleware/autenticar")
 const restringirAdmin = require("../middleware/restringirAdmin")
 
 const router = express.Router()
 
-router.use(autenticar) // Todas as rotas de frete precisam de autenticação
 
 router.post("/calcular", freteController.calcular)
 router.get("/rastrear/:codigoRastreio", freteController.rastrear)

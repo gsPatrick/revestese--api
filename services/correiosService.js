@@ -1,7 +1,7 @@
 const axios = require('axios');
 
 const correiosService = {
-  async calcularFreteCorreios(args) {
+async calcularFreteCorreios(args) {
     try {
       console.log('--- INÍCIO CÁLCULO CORREIOS (via Frenet REST v1) ---');
       console.log('Argumentos recebidos:', JSON.stringify(args, null, 2));
@@ -40,7 +40,8 @@ const correiosService = {
           headers: {
             'Accept': 'application/json',
             'Content-Type': 'application/json',
-            'token': '085C9935RA315R45F8RB755RB94B3584E3DE' // <-- seu token direto aqui
+            // TOKEN REMOVIDO para permitir chamadas deslogadas
+            // 'token': '085C9935RA315R45F8RB755RB94B3584E3DE' 
           }
         }
       );
@@ -66,7 +67,9 @@ const correiosService = {
     } catch (error) {
       console.error('ERRO na requisição Frenet:', error.message);
       console.error(error.stack);
-      return [];
+      // Se houver um erro específico de configuração ou timeout, retorne um array vazio ou um erro mais claro.
+      // Por enquanto, manter o retorno vazio para não quebrar o fluxo.
+      return []; 
     }
   }
 };
