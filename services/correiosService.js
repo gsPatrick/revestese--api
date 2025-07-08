@@ -40,8 +40,7 @@ async calcularFreteCorreios(args) {
           headers: {
             'Accept': 'application/json',
             'Content-Type': 'application/json',
-            // TOKEN REMOVIDO para permitir chamadas deslogadas
-            // 'token': '085C9935RA315R45F8RB755RB94B3584E3DE' 
+             'token': '085C9935RA315R45F8RB755RB94B3584E3DE' 
           }
         }
       );
