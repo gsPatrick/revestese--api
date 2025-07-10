@@ -1,13 +1,33 @@
+# Se for um Dockerfile Node.js padrão, pode parecer algo assim:
 
-FROM node:20
+# Use uma imagem base Node.js
+FROM node:18-alpine
 
-# Definir diretório de trabalho
-WORKDIR /
+# Defina o diretório de trabalho dentro do contêiner
+WORKDIR /usr/src/app
 
+# Copie o arquivo package.json e package-lock.json
 COPY package*.json ./
+
+# Instale as dependências do projeto
+# Evite --only=production aqui se você precisar de sequelize-cli (dev dependency) em tempo de execução para migrações
 RUN npm install
+
+# Copie o restante do código da aplicação
 COPY . .
 
-# Expor porta
-EXPOSE 3045
+# --- ADICIONE ESTAS DUAS LINHAS PARA O ENTRYPOINT ---
+# Copie o script entrypoint e torne-o executável
+COPY entrypoint.sh .
+RUN chmod +x entrypoint.sh
+
+# Exponha a porta da aplicação (se necessário)
+EXPOSE 3035
+
+# Defina o ENTRYPOINT para seu script customizado
+# Este será o primeiro comando a ser executado.
+ENTRYPOINT ["/usr/src/app/entrypoint.sh"]
+
+# Defina o comando padrão para iniciar a aplicação
+# Este comando será passado como argumento para o ENTRYPOINT (o "$@" no script).
 CMD ["npm", "start"]

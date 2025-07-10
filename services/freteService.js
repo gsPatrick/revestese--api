@@ -18,12 +18,15 @@ const freteService = {
             const variacao = await VariacaoProduto.findByPk(item.variacaoId);
             if (!variacao) {
               console.warn(`Variação ${item.variacaoId} não encontrada. Tratando como físico.`);
-              return false; // Se a variação não existe, trate como físico para não perder o cálculo.
+              return false;
             }
             return variacao.digital;
           }
+          // Se não tiver variação, assume que é físico (ou ajuste conforme sua regra)
+          // Se o produto em si tem uma flag 'digital', você precisaria verificar Produto.findByPk(item.produtoId) aqui.
+          // Assumindo que produtos SEM variação são físicos por padrão no seu sistema atual.
           console.warn(`Item ${item.produtoId} sem variaçãoId. Tratando como físico.`);
-          return false; // Se não tiver variação, assume que é físico (ou ajuste conforme sua regra)
+          return false;
         })
       );
 
@@ -42,106 +45,41 @@ const freteService = {
         }];
       }
 
-      // 2. Preparar dados para a API dos Correios
-      let pesoTotal = 0;
-      let valorTotalDeclarado = 0;
-      let comprimentoMax = 0; // Usado para a maior dimensão do pacote
-      let larguraMax = 0;     // Usado para a maior dimensão do pacote
-      let alturaTotal = 0;    // Soma das alturas para empilhamento
+      // 2. Lógica para produtos FÍSICOS: Frete Fixo / Frete Grátis Condicional
+      // Se há itens físicos, ignoramos totalmente o cálculo de peso/dimensões para Correios
+      // e os métodos de frete personalizados.
+      const cidadeDestino = enderecoDestino.cidade;
+      const estadoDestino = enderecoDestino.estado;
 
-      const itensFisicos = itens.filter((_, index) => !flagsDigitais[index]);
-      console.log('Itens Físicos para cálculo de frete:', JSON.stringify(itensFisicos, null, 2));
+      let opcoesFreteFisico = [];
 
-      if (itensFisicos.length === 0) {
-        console.log('Nenhum item físico encontrado para cálculo de frete. Retornando array vazio.');
-        return []; // Não há itens físicos para calcular frete tradicional
-      }
-
-      for (const item of itensFisicos) {
-        const produto = await Produto.findByPk(item.produtoId);
-        const variacao = item.variacaoId ? await VariacaoProduto.findByPk(item.variacaoId) : null;
-
-        if (!produto) {
-          console.warn(`Produto ${item.produtoId} não encontrado. Ignorando no cálculo de frete.`);
-          continue;
-        }
-        if (item.variacaoId && !variacao) {
-          console.warn(`Variação ${item.variacaoId} para produto ${item.produtoId} não encontrada. Ignorando no cálculo de frete.`);
-          continue;
-        }
-
-        const pesoItem = produto.peso || 0.3; // Garante um valor padrão
-        const precoItem = variacao ? (Number(variacao.preco) || 0) : (Number(produto.preco) || 0); // Pega preço da variação ou do produto
-        const comprimentoItem = produto.comprimento || 10;
-        const larguraItem = produto.largura || 10;
-        const alturaItem = produto.altura || 10;
-
-        pesoTotal += pesoItem * item.quantidade;
-        valorTotalDeclarado += precoItem * item.quantidade;
-
-        // Considerações para as dimensões:
-        // Assume que os itens serão colocados lado a lado no comprimento/largura
-        // e empilhados na altura.
-        comprimentoMax = Math.max(comprimentoMax, comprimentoItem);
-        larguraMax = Math.max(larguraMax, larguraItem);
-        alturaTotal += alturaItem * item.quantidade; // Soma as alturas se empilhadas
+      if (cidadeDestino && estadoDestino && cidadeDestino.toLowerCase() === 'presidente epitácio' && estadoDestino.toLowerCase() === 'sp') {
+        console.log('Endereço de destino é Presidente Epitácio/SP. Oferecendo Frete Grátis.');
+        opcoesFreteFisico.push({
+          id: 'frete_gratis_local',
+          name: 'Frete Grátis (Entrega Local)',
+          price: '0.00',
+          company: { name: 'Doodle Dreams' },
+          delivery_time: 2, // Exemplo: 2 dias úteis para entrega local
+          custom_description: 'Entrega grátis em Presidente Epitácio/SP.',
+        });
+      } else {
+        console.log('Endereço de destino não é Presidente Epitácio/SP. Oferecendo Frete Fixo (R$ 9.90).');
+        opcoesFreteFisico.push({
+          id: 'frete_fixo_nacional',
+          name: 'Frete Fixo (Brasil)',
+          price: '9.90',
+          company: { name: 'Doodle Dreams' },
+          delivery_time: 7, // Exemplo: 7 dias úteis para entrega nacional
+          custom_description: 'Valor fixo para todo o Brasil.',
+        });
       }
       
-      // Validações mínimas e máximas dos Correios para dimensões e peso
-      const pesoFinal = Math.max(0.01, Math.min(30, pesoTotal)); // Correios: 0.01kg a 30kg
-      const comprimentoFinal = Math.max(16, Math.min(100, comprimentoMax)); // Correios: 16cm a 100cm
-      const alturaFinal = Math.max(2, Math.min(100, alturaTotal)); // Correios: 2cm a 100cm
-      const larguraFinal = Math.max(11, Math.min(100, larguraMax)); // Correios: 11cm a 100cm
-      const valorDeclaradoFinal = Math.max(0, Math.min(10000, valorTotalDeclarado)); // Correios: até R$10.000
-
-      // A soma das dimensões não deve exceder 200cm
-      const somaDimensoes = comprimentoFinal + larguraFinal + alturaFinal;
-      if (somaDimensoes > 200) {
-          // Se exceder, pode-se tentar ajustar ou lançar um erro específico
-          // Para simplificar, vou ajustar proporcionalmente as maiores dimensões para caber
-          const ratio = 200 / somaDimensoes;
-          comprimentoFinal *= ratio;
-          larguraFinal *= ratio;
-          alturaFinal *= ratio;
-          console.warn(`Dimensões excedem 200cm, ajustando para C: ${comprimentoFinal.toFixed(0)}, L: ${larguraFinal.toFixed(0)}, A: ${alturaFinal.toFixed(0)}`);
-      }
-
-      const pacote = {
-          sCepOrigem: enderecoOrigem.cep.replace(/\D/g, ''),
-          sCepDestino: enderecoDestino.cep.replace(/\D/g, ''),
-          nVlPeso: parseFloat(pesoFinal.toFixed(2)),
-          nVlComprimento: parseFloat(comprimentoFinal.toFixed(0)), // Arredonda para inteiro
-          nVlAltura: parseFloat(alturaFinal.toFixed(0)),
-          nVlLargura: parseFloat(larguraFinal.toFixed(0)),
-          nVlValorDeclarado: parseFloat(valorDeclaradoFinal.toFixed(2))
-      };
-
-      console.log('Dados do Pacote calculados para Correios:', JSON.stringify(pacote, null, 2));
-
-      // 3. Chamar o serviço dos Correios
-      const opcoesCorreios = await correiosService.calcularFreteCorreios(pacote);
-      console.log('Opções de frete recebidas do Correios Service:', JSON.stringify(opcoesCorreios, null, 2));
-
-      // 4. Buscar métodos personalizados
-      const metodosPersonalizados = await MetodoFrete.findAll({ where: { ativo: true } });
-      const opcoesPersonalizadas = metodosPersonalizados.map(metodo => ({
-        id: `custom_${metodo.id}`,
-        name: metodo.titulo,
-        price: parseFloat(metodo.valor).toFixed(2),
-        custom: true,
-        company: { name: "Frete Personalizado" },
-        delivery_time: metodo.prazoEntrega,
-        custom_description: metodo.descricao,
-      }));
-      console.log('Opções de frete personalizadas:', JSON.stringify(opcoesPersonalizadas, null, 2));
-
-
-      // 5. Combinar e retornar
-      const todasOpcoes = [...opcoesCorreios, ...opcoesPersonalizadas];
-      console.log('Todas as opções de frete COMBINADAS:', JSON.stringify(todasOpcoes, null, 2));
+      console.log('Opções de frete para produtos físicos:', JSON.stringify(opcoesFreteFisico, null, 2));
       console.log('=== FIM CÁLCULO FRETE SERVICE ===');
 
-      return todasOpcoes;
+      // Retorna as opções de frete fixas/grátis. Não há combinação com Correios ou métodos personalizados.
+      return opcoesFreteFisico;
 
     } catch (error) {
       console.error("ERRO GERAL no serviço de frete:", error.message);
@@ -151,7 +89,7 @@ const freteService = {
   },
 
   // As funções abaixo para Melhor Envio (comentadas) e CRUD de métodos personalizados (ativadas)
-  // permanecem as mesmas.
+  // permanecem as mesmas, mas não serão invocadas pela função calcularFrete principal.
   // ...
   async criarMetodoFrete(dados) {
     try {

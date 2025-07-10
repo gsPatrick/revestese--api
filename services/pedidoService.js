@@ -6,22 +6,30 @@ const pagamentoService = require("./pagamentoService")
 const { Op } = require('sequelize');
 
 const pedidoService = {
- async criarPedido(usuarioId, itensPedido, enderecoEntrega, freteId, cupomCodigo = null) {
+  async criarPedido(usuarioId, itensPedido, enderecoEntrega, freteId, cupomCodigo = null) {
     try {
       let total = 0;
       let desconto = 0;
       let valorFrete = 0;
       let dadosFrete = null;
+      let cupomAplicadoId = null; // Novo: Para armazenar o ID do cupom
 
-      // Verificar se todos os produtos são digitais
+      // 1. Lógica para produtos digitais e físicos
       const verificacoesDigitais = await Promise.all(itensPedido.map(async (item) => {
         if (item.variacaoId) {
           const variacao = await VariacaoProduto.findOne({
             where: { id: item.variacaoId, produtoId: item.produtoId }
           });
-          return variacao?.digital || false;
+          // Se a variação não existe ou está inativa, trate como físico.
+          if (!variacao || !variacao.ativo) {
+             console.warn(`Variação ${item.variacaoId} não encontrada ou inativa. Tratando como físico.`);
+             return false;
+          }
+          return variacao.digital;
         }
-        return false;
+        // Se não tiver variação, assume que é físico (ou ajuste conforme sua regra).
+        console.warn(`Item ${item.produtoId} sem variaçãoId. Tratando como físico.`);
+        return false; 
       }));
       const todosDigitais = verificacoesDigitais.every(isDigital => isDigital);
 
@@ -29,44 +37,17 @@ const pedidoService = {
       if (!todosDigitais && !enderecoEntrega) {
         throw new Error("Endereço de entrega é obrigatório para produtos físicos.");
       }
-
-      // Se freteId é fornecido, calcular/definir valor do frete
-      if (freteId) {
-        const freteIdStr = String(freteId);
-        if (freteIdStr.startsWith('custom_')) {
-          const { MetodoFrete } = require("../models");
-          const metodoFreteId = freteIdStr.replace('custom_', '');
-          const metodoFrete = await MetodoFrete.findByPk(metodoFreteId);
-
-          if (!metodoFrete) {
-            throw new Error("Método de frete personalizado não encontrado.");
-          }
-          valorFrete = parseFloat(metodoFrete.valor);
-          dadosFrete = {
-            servico: metodoFrete.titulo,
-            valor: valorFrete,
-            prazoEntrega: metodoFrete.prazoEntrega,
-            statusEntrega: "pendente"
-          };
-        } else {
-          // Aqui você faria a chamada para o Melhor Envio, por exemplo.
-          // Para fins de teste, vamos assumir um valor fixo.
-          valorFrete = 15.00;
-          dadosFrete = {
-            servico: "Correios PAC",
-            valor: valorFrete,
-            prazoEntrega: 7,
-            statusEntrega: "pendente"
-          };
-        }
-      }
+      // O freteId é obrigatório para produtos físicos e será validado pelo freteService.calcularFrete
+      // ou pela nova lógica fixa.
 
       // Calcular total dos itens e ajustar estoque
       const itensProcessados = [];
+      let quantidadeTotalItens = 0; // Para a regra de quantidade mínima de produtos do cupom
+
       for (const item of itensPedido) {
         const produto = await Produto.findByPk(item.produtoId);
         if (!produto || !produto.ativo) {
-          throw new Error(`Produto ${item.produtoId} não encontrado ou inativo`);
+          throw new Error(`Produto ${item.produtoId} não encontrado ou inativo.`);
         }
 
         let variacao = null;
@@ -76,56 +57,93 @@ const pedidoService = {
         if (item.variacaoId) {
           variacao = await VariacaoProduto.findOne({ where: { id: item.variacaoId, produtoId: item.produtoId } });
           if (!variacao || !variacao.ativo) {
-            throw new Error(`Variação ${item.variacaoId} não encontrada ou inativa`);
+            throw new Error(`Variação ${item.variacaoId} para produto ${produto.nome} não encontrada ou inativa.`);
           }
           precoBase = variacao.preco;
           eDigital = variacao.digital;
           if (!eDigital && variacao.estoque < item.quantidade) {
-            throw new Error(`Estoque insuficiente para a variação ${variacao.nome}`);
+            throw new Error(`Estoque insuficiente para a variação "${variacao.nome}" do produto "${produto.nome}". Disponível: ${variacao.estoque}, Solicitado: ${item.quantidade}.`);
           }
         } else {
-          // Se o produto não tem variações, busca o preço e estoque direto nele
-          precoBase = produto.preco; // Supondo que produto sem variação tem um campo 'preco'
-          eDigital = false; // Supondo que produto sem variação não é digital
-          if (produto.estoque < item.quantidade) { // Supondo que produto sem variação tem 'estoque'
-            throw new Error(`Estoque insuficiente para ${produto.nome}`);
+          // Se o produto não tem variações, assume preço e estoque diretos do produto
+          // Assumindo que produto sem variação é físico e tem estoque diretamente nele
+          precoBase = produto.preco; 
+          eDigital = false; 
+          // Se um produto SEM variação for digital, você precisaria de uma flag `digital` no modelo `Produto`.
+          // Pelo seu freteService.js, se não há variacaoId, ele é tratado como físico.
+          if (produto.estoque < item.quantidade) { 
+            throw new Error(`Estoque insuficiente para o produto "${produto.nome}". Disponível: ${produto.estoque}, Solicitado: ${item.quantidade}.`);
           }
         }
 
-        total += precoBase * item.quantidade;
+        total += parseFloat(precoBase) * item.quantidade; // Use parseFloat para garantir cálculo correto
+        quantidadeTotalItens += item.quantidade; // Incrementa a quantidade total de itens
 
         itensProcessados.push({
           produtoId: item.produtoId,
           variacaoId: item.variacaoId || null,
           nome: variacao ? `${produto.nome} - ${variacao.nome}` : produto.nome,
-          preco: precoBase,
+          preco: parseFloat(precoBase),
           quantidade: item.quantidade,
-          subtotal: precoBase * item.quantidade,
+          subtotal: parseFloat(precoBase) * item.quantidade,
           digital: eDigital,
         });
       }
 
       // Aplicar cupom se fornecido
       if (cupomCodigo) {
-        const resultadoCupom = await cupomService.aplicarCupom({ total }, cupomCodigo);
+        const resultadoCupom = await cupomService.aplicarCupom(
+          { total: total, quantidadeItens: quantidadeTotalItens, usuarioId: usuarioId },
+          cupomCodigo
+        );
         desconto = resultadoCupom.desconto;
-        total = resultadoCupom.total;
+        total = resultadoCupom.total; // Total já com desconto
+        cupomAplicadoId = resultadoCupom.cupomId; // Armazena o ID do cupom
       }
 
-      // Adicionar valor do frete ao total
-      const totalComFrete = total + valorFrete;
+      // Calcular frete para produtos físicos
+      if (!todosDigitais) {
+        const freteOpts = await require('./freteService').calcularFrete(
+          await require('./configuracaoLojaService').obterEnderecoOrigem(), // Pega endereço da loja
+          enderecoEntrega,
+          itensPedido.filter((_, index) => !verificacoesDigitais[index]) // Apenas itens físicos
+        );
+        
+        const freteSelecionado = freteOpts.find(opt => opt.id === freteId);
+        if (!freteSelecionado) {
+          throw new Error("Método de frete selecionado inválido para os itens ou endereço.");
+        }
+        valorFrete = parseFloat(freteSelecionado.price);
+        dadosFrete = {
+          servico: freteSelecionado.name,
+          valor: valorFrete,
+          prazoEntrega: freteSelecionado.delivery_time,
+          statusEntrega: "pendente"
+        };
+      } else {
+          valorFrete = 0; // Frete sempre zero para produtos totalmente digitais
+      }
+
+      // Adicionar valor do frete ao total (se houver)
+      const totalFinal = total + valorFrete;
 
       // Criar o pedido
       const pedido = await Pedido.create({
         usuarioId,
         itens: itensProcessados,
-        total: todosDigitais ? total : totalComFrete,
-        valorFrete: todosDigitais ? 0 : valorFrete,
+        total: totalFinal,
+        valorFrete: valorFrete,
         desconto,
         cupomAplicado: cupomCodigo,
+        cupomAplicadoId: cupomAplicadoId, // Novo campo para o ID do cupom
         enderecoEntrega: todosDigitais ? null : enderecoEntrega, // Objeto completo de endereço
         status: "pendente",
       });
+
+      // Se o cupom foi aplicado e o pedido foi criado, incrementa o uso
+      if (cupomAplicadoId) {
+        await cupomService.incrementarUso(cupomAplicadoId);
+      }
 
       // Criar o registro de frete apenas para produtos físicos
       if (dadosFrete && !todosDigitais) {
@@ -136,30 +154,34 @@ const pedidoService = {
       }
 
       // Atualizar estoque para produtos físicos ou variações físicas
-      for (const item of itensPedido) {
-        if (item.variacaoId) {
-          const variacao = await VariacaoProduto.findByPk(item.variacaoId);
-          if (variacao && !variacao.digital) { // Só reduz estoque se não for digital
-            variacao.estoque -= item.quantidade;
-            await variacao.save();
-          }
-        } else {
-          const produto = await Produto.findByPk(item.produtoId);
-          if (produto) { // Para produtos sem variação
-            produto.estoque -= item.quantidade;
-            await produto.save();
-          }
+      for (const item of itensProcessados) { // Iterar sobre itensProcessados (já validados)
+        if (!item.digital) { // Só reduz estoque se não for digital
+            if (item.variacaoId) {
+                const variacao = await VariacaoProduto.findByPk(item.variacaoId);
+                if (variacao) { // Verifica se a variação ainda existe
+                    variacao.estoque -= item.quantidade;
+                    await variacao.save();
+                }
+            } else {
+                const produto = await Produto.findByPk(item.produtoId);
+                if (produto) { // Para produtos sem variação
+                    produto.estoque -= item.quantidade;
+                    await produto.save();
+                }
+            }
         }
       }
 
       return pedido;
     } catch (error) {
       console.error("Erro ao criar pedido:", error);
+      // Se a criação do pedido falhou após incrementar o uso do cupom, você pode querer decrementar.
+      // Isso seria mais robusto com transações no Sequelize. Por simplicidade, fica assim.
       throw error;
     }
   },
 
-  async atualizarStatusPedido(pedidoId, status) {
+ async atualizarStatusPedido(pedidoId, status) {
     try {
       const pedido = await Pedido.findByPk(pedidoId, {
         include: [{ model: Usuario }],
@@ -168,6 +190,16 @@ const pedidoService = {
       if (!pedido) {
         throw new Error("Pedido não encontrado")
       }
+
+      // Se o status anterior era "pendente" e agora está "cancelado", decrementa cupom
+      if (pedido.status === "pendente" && status === "cancelado" && pedido.cupomAplicadoId) {
+         await cupomService.decrementarUso(pedido.cupomAplicadoId);
+      }
+       // Se o status anterior não era cancelado e agora é, decrementa
+      else if (pedido.status !== "cancelado" && status === "cancelado" && pedido.cupomAplicadoId) {
+          await cupomService.decrementarUso(pedido.cupomAplicadoId);
+      }
+
 
       pedido.status = status
       await pedido.save()
@@ -191,7 +223,7 @@ const pedidoService = {
     }
   },
 
-  async listarPedidos(usuarioId, filtros = {}) {
+   async listarPedidos(usuarioId, filtros = {}) {
     try {
       const { status, page = 1, limit = 10 } = filtros
       const where = {}
@@ -245,10 +277,11 @@ const pedidoService = {
         currentPage: Number.parseInt(page),
       }
     } catch (error) {
-      throw error
+      throw error;
     }
   },
 
+  
   async buscarPedidoPorId(pedidoId) {
     try {
       const pedido = await Pedido.findByPk(pedidoId, {
@@ -265,7 +298,7 @@ const pedidoService = {
     }
   },
 
-  async cancelarPedido(pedidoId) {
+   async cancelarPedido(pedidoId) {
     try {
       const pedido = await Pedido.findByPk(pedidoId)
       if (!pedido) {
@@ -276,19 +309,27 @@ const pedidoService = {
         throw new Error("Não é possível cancelar pedido já entregue")
       }
 
-      // Restaurar estoque
+      // Se o pedido tinha um cupom aplicado, decrementa o uso antes de mudar o status
+      // A regra de decremento é que ele deve ter um cupomAplicadoId e não ter sido cancelado ainda.
+      if (pedido.cupomAplicadoId && pedido.status !== "cancelado") {
+        await cupomService.decrementarUso(pedido.cupomAplicadoId);
+      }
+
+      // Restaurar estoque (apenas para itens não digitais)
       for (const item of pedido.itens) {
-        if (item.variacaoId) {
-          const variacao = await VariacaoProduto.findByPk(item.variacaoId)
-          if (variacao && !variacao.digital) {
-            variacao.estoque += item.quantidade
-            await variacao.save()
-          }
-        } else {
-          const produto = await Produto.findByPk(item.produtoId)
-          if (produto) {
-            produto.estoque += item.quantidade
-            await produto.save()
+        if (!item.digital) { // Verifica a flag digital no item do pedido
+          if (item.variacaoId) {
+            const variacao = await VariacaoProduto.findByPk(item.variacaoId)
+            if (variacao) { // Verifica se a variação existe
+              variacao.estoque += item.quantidade
+              await variacao.save()
+            }
+          } else {
+            const produto = await Produto.findByPk(item.produtoId)
+            if (produto) { // Para produtos sem variação
+              produto.estoque += item.quantidade
+              await produto.save()
+            }
           }
         }
       }
@@ -301,6 +342,7 @@ const pedidoService = {
       throw error
     }
   },
+
 
   async verificarSeUsuarioComprouProduto(usuarioId, produtoId) {
     try {
@@ -458,7 +500,7 @@ async obterDownloadsPorUsuario(usuarioId) {
       throw error;
     }
   },
-  // ... (outras funções) ...
+
    async buscarProdutosRelacionados(idOuSlug, limite = 4) {
     try {
       // ... (mantido como antes, ele busca slug e formata URLs) ...
@@ -547,6 +589,220 @@ async obterDownloadsPorUsuario(usuarioId) {
       throw error;
     }
   },
+
+
+ async verificarSeUsuarioComprouProduto(usuarioId, produtoId) {
+    try {
+      const pedidos = await Pedido.findAll({
+        where: {
+          usuarioId,
+          status: {
+            [Op.in]: ["pago", "processando", "enviado", "entregue", "concluido"], // Considera como "comprou" se o pedido está em um desses status
+          },
+        },
+      })
+
+      if (!pedidos || pedidos.length === 0) return false
+
+      const comprouProduto = pedidos.some((pedido) =>
+        pedido.itens.some((item) => item.produtoId === produtoId)
+      )
+      return comprouProduto
+    } catch (error) {
+      throw error
+    }
+  },
+
+   async listarProdutosPagosPorUsuario(usuarioId) {
+    try {
+      const pedidos = await Pedido.findAll({
+        where: {
+          usuarioId,
+          status: {
+            [Op.in]: ["pago", "processando", "enviado", "entregue", "concluido"],
+          },
+        },
+      })
+
+      const produtosPagos = []
+      for (const pedido of pedidos) {
+        for (const item of pedido.itens) {
+          const produto = await Produto.findByPk(item.produtoId, {
+            include: [{ model: ArquivoProduto }],
+          })
+          if (produto) {
+            produtosPagos.push({
+              produtoId: produto.id,
+              nome: produto.nome,
+              arquivos: produto.ArquivoProdutos,
+            })
+          }
+        }
+      }
+
+      return produtosPagos
+    } catch (error) {
+      throw error
+    }
+  },
+
+  async obterDownloadsPorUsuario(usuarioId) {
+    try {
+      const pedidos = await Pedido.findAll({
+        where: {
+          usuarioId,
+          status: ['pago', 'processando', 'enviado', 'entregue', 'concluido'],
+        },
+        attributes: ['itens'],
+      });
+
+      const uniqueDigitalProductIds = new Set();
+
+      for (const pedido of pedidos) {
+        if (pedido.itens && Array.isArray(pedido.itens)) {
+          for (const item of pedido.itens) {
+            if (item.digital) { // Assume que a flag digital está no item do pedido
+                 uniqueDigitalProductIds.add(item.produtoId);
+            }
+          }
+        }
+      }
+
+      if (uniqueDigitalProductIds.size === 0) {
+          return [];
+      }
+
+      // 2. Buscar os detalhes dos PRODUTOS digitais únicos, INCLUINDO SEUS ARQUIVOS DIGITAIS E IMAGEM PRINCIPAL via associação
+      const baseUrl = process.env.BASE_URL || 'http://localhost:3035';
+
+      const produtosDigitaisComArquivos = await Produto.findAll({
+        where: {
+          id: { [Op.in]: Array.from(uniqueDigitalProductIds) },
+          ativo: true, 
+        },
+        include: [{
+          model: ArquivoProduto,
+          as: 'ArquivoProdutos',
+          // Inclui arquivos digitais E imagem principal
+          where: { 
+              [Op.or]: [
+                  { tipo: 'arquivo' }, 
+                  { tipo: 'imagem', principal: true } // Incluir a imagem principal
+              ]
+          }, 
+          required: false // Não exige que o produto tenha arquivos (pode ter só a imagem principal)
+        }],
+        attributes: [
+            'id', 
+            'nome', 
+            'slug', 
+            'descricao', 
+            // Não precisamos mais buscar 'imagens' ou 'itensDownload' como JSON aqui
+        ], 
+      });
+
+      // 3. Formatar os dados para o frontend
+      const downloadsFormatados = produtosDigitaisComArquivos.map(produto => {
+        const produtoJSON = produto.toJSON();
+        const arquivosDoProduto = produtoJSON.ArquivoProdutos || [];
+
+        // Encontra a imagem principal (que veio na include, se existir)
+        const imagemPrincipal = arquivosDoProduto.find(arq => arq.tipo === 'imagem' && arq.principal);
+        // Formata a URL da imagem principal
+        const imagemUrl = imagemPrincipal?.url ? new URL(imagemPrincipal.url.replace(/\\/g, '/'), baseUrl).href : 'https://placehold.co/80x80.png';
+
+        // Filtra e formata APENAS os arquivos digitais para a lista de downloads
+        const arquivosDigitaisFormatados = arquivosDoProduto
+          .filter(arq => arq.tipo === 'arquivo')
+          .map(arq => ({
+            id: arq.id,
+            nome: arq.nome,
+            url: arq.url, // Caminho relativo /uploads/...
+            fullUrl: new URL(arq.url.replace(/\\/g, '/'), baseUrl).href, // URL completa para download
+            mimeType: arq.mimeType,
+            tamanho: arq.tamanho,
+          }));
+
+        return {
+          produtoId: produtoJSON.id,
+          nome: produtoJSON.nome, 
+          slug: produtoJSON.slug, 
+          descricao: produtoJSON.descricao,
+          imagemUrl: imagemUrl, // URL completa da imagem principal
+          arquivos: arquivosDigitaisFormatados, // Lista de arquivos digitais formatada
+        };
+      });
+
+      // Opcional: Filtrar resultados para remover produtos que não tinham arquivos digitais tipo 'arquivo'
+      // (se required: false e um produto só tinha a imagem principal, ele virá mas sem arquivos digitais)
+       const downloadsComArquivosReais = downloadsFormatados.filter(item => item.arquivos.length > 0);
+
+
+      // Retorna a lista final com nome, slug, imagem e arquivos
+      return downloadsComArquivosReais;
+
+    } catch (error) {
+      console.error("Erro ao obter downloads do usuário:", error);
+      if (error.original?.sqlMessage) {
+           console.error("Detalhes do erro SQL:", error.original.sqlMessage, error.sql);
+       }
+       if (error.original?.code === 'ER_BAD_FIELD_ERROR') {
+            throw new Error("Erro na estrutura do banco de dados. A coluna 'slug' pode estar faltando na tabela 'produtos'.");
+       }
+      throw error;
+    }
+  },
+  // ... (outras funções) ...
+   async buscarProdutosRelacionados(idOuSlug, limite = 4) {
+    try {
+      // ... (mantido como antes, ele busca slug e formata URLs) ...
+       const isNumeric = !isNaN(parseFloat(idOuSlug)) && isFinite(idOuSlug);
+      const whereClause = isNumeric ? { id: idOuSlug } : { slug: idOuSlug };
+
+      const produtoAtual = await Produto.findOne({ where: whereClause });
+      if (!produtoAtual || !produtoAtual.categoriaId) {
+        return [];
+      }
+
+      const relacionados = await Produto.findAll({
+        where: {
+          categoriaId: produtoAtual.categoriaId,
+          id: { [Op.ne]: produtoAtual.id },
+          ativo: true,
+        },
+        limit: parseInt(limite),
+        // Aqui você pode escolher incluir ArquivoProduto OU usar a propriedade JSON 'imagens'
+        // Se a versão antiga do modelo Produto tinha 'imagens' como JSON e o frontend lê de lá,
+        // então NÃO inclua ArquivoProduto aqui para relacionados.
+        // Mas o seu produtoService.listarProdutos e buscarProdutoPorId incluem ArquivoProdutos.
+        // Vamos manter a consistência e incluir ArquivoProdutos, e formatar como array de URLs.
+        include: [
+          { model: ArquivoProduto, as: 'ArquivoProdutos', required: false },
+          { model: VariacaoProduto, as: 'variacoes', required: false },
+        ],
+      });
+
+      const baseUrl = process.env.BASE_URL || 'http://localhost:3035';
+      const produtosFormatados = relacionados.map(produto => {
+        const p = produto.toJSON();
+         // Formata o array de URLs de imagens a partir da associação ArquivoProduto
+        p.imagens = (p.ArquivoProdutos || [])
+          .filter(arq => arq.tipo === 'imagem')
+          .sort((a, b) => (a.principal ? -1 : 1) - (b.principal ? -1 : 1))
+          .map(arq => new URL(arq.url.replace(/\\/g, '/'), baseUrl).href);
+         // Limpa a associação ArquivoProdutos do objeto final se não quiser retorná-la diretamente
+         delete p.ArquivoProdutos; 
+        return p;
+      });
+
+      return produtosFormatados;
+
+    } catch (error) {
+      console.error("Erro ao buscar produtos relacionados:", error);
+      throw error;
+    }
+  },
+
 }
 
 module.exports = pedidoService;

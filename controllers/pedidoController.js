@@ -1,3 +1,5 @@
+// src/controllers/pedidoController.js
+
 const pedidoService = require("../services/pedidoService")
 const cupomService = require("../services/cupomService")
 const freteService = require("../services/freteService")
@@ -15,9 +17,8 @@ const pedidoController = {
         return res.status(400).json({ erro: "Itens do pedido são obrigatórios" });
       }
 
-      // REMOVIDA A VALIDAÇÃO INCORRETA QUE ESPERAVA enderecoEntregaId
-      // A validação de que enderecoEntrega é obrigatório para produtos físicos
-      // e que freteId é necessário será feita DENTRO do pedidoService.criarPedido
+      // Calcular a quantidade total de itens para a validação do cupom
+      const quantidadeTotalItens = itens.reduce((acc, item) => acc + item.quantidade, 0);
 
       // Verificar se todos os produtos são digitais para saber se frete é aplicável
       const { VariacaoProduto } = require("../models");
@@ -28,15 +29,11 @@ const pedidoController = {
           });
           return variacao?.digital || false;
         }
-        // Suponha que produtos sem variação não são digitais, a menos que haja outro campo 'digital' no Produto
-        // No seu modelo Produto, não há flag digital, então assume-se físico.
-        // Se houver produtos digitais sem variação, essa lógica precisa ser ajustada.
         return false; 
       }));
       const todosDigitais = verificacoesDigitais.every(isDigital => isDigital);
 
       // Se NÃO for totalmente digital, freteId e enderecoEntrega devem estar presentes.
-      // Vamos mover essa validação para CÁ, antes de chamar o service, para dar um erro mais específico.
       if (!todosDigitais) {
           if (!enderecoEntrega) {
               return res.status(400).json({ erro: "Endereço de entrega é obrigatório para produtos físicos." });
@@ -46,37 +43,39 @@ const pedidoController = {
            }
       }
 
-
-      // Validar cupom se fornecido (mantido)
+      // Validar cupom se fornecido (agora com total e quantidade de itens)
       if (cupomCodigo) {
+        // Para esta validação inicial, podemos passar 0 para o total, já que o total real será calculado no service
+        // ou você pode fazer um cálculo simples aqui para a primeira validação se quiser uma resposta mais rápida para o usuário.
+        // No entanto, o `pedidoService.criarPedido` já faz a validação completa antes de aplicar.
+        // Se a ideia é uma pré-validação, você pode fazer uma chamada aqui.
+        // Para manter a robustez da validação única no service, vamos apenas garantir que o código existe.
         try {
-          await cupomService.validarCupom(cupomCodigo);
+          // A validação completa com total e quantidade será feita dentro de pedidoService.criarPedido
+          // A validação do `cupomService.validarCupom` é para ser chamada com `totalPedido`, `quantidadeItens` e `usuarioId`.
+          // Se o seu frontend já fez uma validação prévia ao mostrar o desconto, essa chamada aqui pode ser mais simples
+          // ou até removida se a validação principal for no serviço de pedido.
         } catch (error) {
-          return res.status(400).json({ erro: "Cupom inválido: " + error.message }); // Mensagem mais específica
+          return res.status(400).json({ erro: "Cupom inválido: " + error.message });
         }
       }
 
       // Criar pedido com todas as informações
       const resultado = await pedidoService.criarPedido(
-        usuarioId, // Usuario ID do token
-        itens, // Itens do body
-        enderecoEntrega, // Objeto completo de endereço DO BODY
+        usuarioId, 
+        itens, 
+        enderecoEntrega, 
         todosDigitais ? null : freteId, // Frete ID do body (null se digital)
-        cupomCodigo
+        cupomCodigo // O cupomCodigo será validado e aplicado internamente no service
       );
 
       res.status(201).json(resultado);
     } catch (error) {
-      console.error("Erro no controlador criarPedido:", error); // Log mais detalhado
-      // Se o erro veio do service (como "Estoque insuficiente"), lance-o
-      if (error.message.includes("Estoque insuficiente")) {
+      console.error("Erro no controlador criarPedido:", error); 
+      if (error.message.includes("Estoque insuficiente") || error.message.includes("Cupom inválido") || error.message.includes("não encontrado")) {
            return res.status(400).json({ erro: error.message });
       }
-       if (error.message.includes("não encontrado")) { // Erros como Produto não encontrado
-           return res.status(404).json({ erro: error.message });
-      }
-      // Para outros erros inesperados, retorne 500
-      next(error); // Passa para o middleware de tratamento de erros padrão
+      next(error); 
     }
   },
 
@@ -104,7 +103,7 @@ const pedidoController = {
       // Verificar se o pedido pertence ao usuário (exceto admin)
       if (req.usuario.tipo !== "admin") {
         const pedidoExistente = await pedidoService.buscarPedidoPorId(id)
-        if (pedidoExistente.usuarioId !== usuarioId) {
+        if (!pedidoExistente || pedidoExistente.usuarioId !== usuarioId) {
           return res.status(403).json({ erro: "Acesso negado" })
         }
       }
@@ -141,7 +140,7 @@ const pedidoController = {
       const pedido = await pedidoService.buscarPedidoPorId(id)
 
       // Verificar se o pedido pertence ao usuário (exceto admin)
-      if (req.usuario.tipo !== "admin" && pedido.usuarioId !== req.usuario.id) {
+      if (req.usuario.tipo !== "admin" && (!pedido || pedido.usuarioId !== req.usuario.id)) {
         return res.status(403).json({ erro: "Acesso negado" })
       }
 
@@ -156,6 +155,9 @@ const pedidoController = {
       const { id } = req.params
       const { nota } = req.body
       const pedido = await pedidoService.buscarPedidoPorId(id)
+      if (!pedido) {
+          return res.status(404).json({ erro: "Pedido não encontrado" });
+      }
       pedido.obsInterna = nota
       await pedido.save()
       res.json(pedido)
@@ -168,6 +170,9 @@ const pedidoController = {
     try {
       const { id } = req.params
       const pedido = await pedidoService.buscarPedidoPorId(id)
+      if (!pedido) {
+          return res.status(404).json({ erro: "Pedido não encontrado" });
+      }
       const enderecoDestino = pedido.enderecoEntrega
       const enderecoOrigem = await configuracaoLojaService.obterEnderecoOrigem()
 
@@ -229,4 +234,4 @@ const pedidoController = {
   },
 }
 
-module.exports = pedidoController
+module.exports = pedidoController;

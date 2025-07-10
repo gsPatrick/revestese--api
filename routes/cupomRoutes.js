@@ -1,18 +1,18 @@
-const express = require("express")
-const cupomController = require("../controllers/cupomController")
-const { verifyToken, isAdmin } = require("../middleware/auth")
+// Exemplo: src/routes/cupomRoutes.js
 
-const router = express.Router()
+const express = require('express');
+const router = express.Router();
+const cupomController = require('../controllers/cupomController');
+const { verifyToken, checkPermission } = require('../middlewares/authMiddleware'); // Seus middlewares de autenticação/permissão
 
-// Rotas públicas/cliente
-router.post("/validar", cupomController.validarCupom)
-router.post("/aplicar", cupomController.aplicarCupom)
+// Rotas de Cupons
+router.post('/', verifyToken, checkPermission(['admin']), cupomController.criarCupom);
+router.get('/', verifyToken, checkPermission(['admin']), cupomController.listarCupons); // Filtragem invisivel já implementada
+router.get('/principal', cupomController.obterCupomPrincipal); // NOVO ENDPOINT: Acessível publicamente para pop-up
+router.post('/validar', cupomController.validarCupom); // Pode ser público se a validação não expuser dados sensíveis
+router.post('/aplicar', cupomController.aplicarCupom); // Pode ser público
+router.get('/:id', verifyToken, checkPermission(['admin']), cupomController.buscarCupom);
+router.put('/:id', verifyToken, checkPermission(['admin']), cupomController.atualizarCupom);
+router.delete('/:id', verifyToken, checkPermission(['admin']), cupomController.excluirCupom);
 
-// Rotas administrativas
-router.get("/", verifyToken, isAdmin, cupomController.listarCupons)
-router.post("/", verifyToken, isAdmin, cupomController.criarCupom)
-router.get("/:id", verifyToken, isAdmin, cupomController.buscarCupom)
-router.put("/:id", verifyToken, isAdmin, cupomController.atualizarCupom)
-router.delete("/:id", verifyToken, isAdmin, cupomController.excluirCupom)
-
-module.exports = router
+module.exports = router;
