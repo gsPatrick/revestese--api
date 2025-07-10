@@ -3,6 +3,7 @@
 const express = require('express');
 const router = express.Router();
 const cupomController = require('../controllers/cupomController');
+const { verifyToken} = require("../middleware/auth")
 
 // Rotas de Cupons
 router.post('/', verifyToken, cupomController.criarCupom);
