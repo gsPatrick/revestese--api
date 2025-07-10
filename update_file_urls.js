@@ -4,34 +4,30 @@ require('dotenv').config(); // Certifique-se de que seu .env está configurado
 const { sequelize } = require('./config/database');
 
 const {ArquivoProduto } = require('./models/index'); // Ajuste o caminho se necessário
+const path = require('path'); // Adicionar import de path
 
 async function updateFileUrls() {
-  // REMOVIDO: await sequelize.sync(); // Não precisamos sincronizar o DB para atualizar dados
-
-  const FILE_SERVER_URL = process.env.FILE_SERVER_URL; // Seu novo domínio de arquivos
+  const FILE_SERVER_URL = process.env.FILE_SERVER_URL;
   if (!FILE_SERVER_URL) {
     console.error("Erro: FILE_SERVER_URL não está definida nas variáveis de ambiente. Verifique seu .env.");
     process.exit(1);
   }
 
   try {
-    // Garante que a conexão com o banco de dados está ativa
     await sequelize.authenticate();
     console.log('Conexão com o banco de dados estabelecida com sucesso.');
 
     console.log(`Iniciando atualização de URLs para o File Server: ${FILE_SERVER_URL}`);
 
-    // Busca todos os arquivos que têm URLs que não começam com a nova URL do File Server
-    // ou que contenham o caminho antigo '/uploads/' (para capturar ambos os casos: relativo e backend antigo)
     const arquivosParaAtualizar = await ArquivoProduto.findAll({
       where: {
         [sequelize.Sequelize.Op.or]: [
-          { url: { [sequelize.Sequelize.Op.notLike]: `${FILE_SERVER_URL}%` } },
-          { url: { [sequelize.Sequelize.Op.like]: '%/uploads/%' } } // Captura URLs com o segmento '/uploads/'
+          { url: { [sequelize.Sequelize.Op.notLike]: `${FILE_SERVER_URL}%` } }, // Não é a URL do file server
+          { url: { [sequelize.Sequelize.Op.like]: '%/uploads/%' } }, // Contém o caminho antigo
+          { url: { [sequelize.Sequelize.Op.like]: 'uploads/%' } } // Contém o caminho antigo sem barra inicial
         ]
       }
     });
-
 
     if (arquivosParaAtualizar.length === 0) {
       console.log("Nenhum arquivo para atualizar encontrado. As URLs já estão corretas ou não há arquivos antigos.");
@@ -42,64 +38,63 @@ async function updateFileUrls() {
 
     for (const arquivo of arquivosParaAtualizar) {
       let oldUrl = arquivo.url;
-      let newRelativePath = oldUrl; // Caminho relativo padrão
+      let newRelativePath = oldUrl; // Inicia com a URL antiga
+      let updated = false;
 
-      // Lógica para adaptar o caminho relativo ao formato esperado pelo File Server
-      // Ex: /uploads/imagens/medium/nome.avif  -> /imagens/master/nome_master.avif
-      // Ex: /uploads/videos/nome.mp4          -> /videos/nome.mp4
-      // Ex: /uploads/produtos/nome.zip        -> /produtos/nome.zip
-
+      // REGRA 1: Imagens (convertendo para /imagens/master/UUID_master.avif)
       if (oldUrl.includes('/uploads/imagens/')) {
-        // Assume que se for imagem, queremos a versão 'master' no File Server
-        // Pega o nome do arquivo após a última barra e antes da extensão
         const fileNameWithExt = path.basename(oldUrl);
-        const baseName = fileNameWithExt.split('.')[0]; // nome_variante (ex: 123-abc_medium)
-
-        // Tenta extrair o UUID original (se existir)
-        let uuidPart = baseName.split('_')[0]; // Pega a primeira parte antes do _
-        if (uuidPart.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
-            // Se for um UUID, usa ele como base para o nome do arquivo master
-            newRelativePath = `/imagens/master/${uuidPart}_master.avif`;
-        } else {
-            // Fallback se não for UUID ou padrão complexo: tenta pegar o nome original do arquivo
-            // Isso é menos robusto e pode precisar de ajuste manual.
-            newRelativePath = `/imagens/master/${baseName}_master.avif`;
-            console.warn(`Aviso: UUID não detectado em ${baseName}. Usando nome base para gerar URL master.`);
+        const baseName = fileNameWithExt.split('.')[0];
+        const uuidMatch = baseName.match(/^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
+        
+        let uuidExtracted = uuidMatch ? uuidMatch[1] : baseName;
+        if (!uuidMatch) {
+            console.warn(`Aviso: UUID não detectado em ${baseName} (ID ${arquivo.id}). Usando nome base para gerar URL master.`);
         }
-      } else if (oldUrl.includes('/uploads/videos/')) {
-        newRelativePath = oldUrl.substring(oldUrl.indexOf('/uploads/videos/')).replace('/uploads/', '/');
-      } else if (oldUrl.includes('/uploads/arquivos/')) {
-        newRelativePath = oldUrl.substring(oldUrl.indexOf('/uploads/arquivos/')).replace('/uploads/', '/');
-      } else if (oldUrl.includes('/uploads/produtos/')) {
-        newRelativePath = oldUrl.substring(oldUrl.indexOf('/uploads/produtos/')).replace('/uploads/', '/');
+        newRelativePath = `/imagens/master/${uuidExtracted}_master.avif`;
+        updated = true;
+      } 
+      // REGRA 2: Outros tipos de arquivos (vídeos, arquivos, produtos, temp)
+      else if (oldUrl.includes('/uploads/')) {
+          // Pega o caminho a partir de '/uploads/'
+          let startIndex = oldUrl.indexOf('/uploads/');
+          newRelativePath = oldUrl.substring(startIndex + '/uploads/'.length);
+          newRelativePath = `/${newRelativePath}`; // Garante a barra inicial
+          updated = true;
+      } 
+      // REGRA 3: Caminhos relativos antigos que não começam com '/uploads/' mas com 'uploads/'
+      else if (oldUrl.startsWith('uploads/')) {
+          newRelativePath = `/${oldUrl}`; // Apenas adiciona a barra inicial
+          updated = true;
       } else {
-        // Se a URL não corresponde a nenhum padrão `/uploads/` conhecido,
-        // mas é uma URL absoluta que não é do file server, tenta extrair o pathname.
-        // Se já for uma URL completa, ela será testada contra FILE_SERVER_URL no findAll
-        // e, se não corresponder, será reescrita com o novo domínio.
-        try {
-            const tempUrlObj = new URL(oldUrl);
-            newRelativePath = tempUrlObj.pathname; // Pega apenas o caminho após o domínio
-            // Certifica-se que o caminho começa com /, mas não /uploads/
-            if (newRelativePath.startsWith('/uploads/')) {
-                newRelativePath = newRelativePath.replace('/uploads/', '/');
-            }
-        } catch (e) {
-            console.warn(`Aviso: URL antiga '${oldUrl}' não pôde ser parseada como URL. Tentando usar como caminho bruto.`);
-            // Se não é uma URL válida, assume que é um caminho relativo que precisa de tratamento.
-            // Para URLs que não tinham /uploads/, pode precisar de mais lógica aqui.
-        }
+          // Se não caiu em nenhuma regra de /uploads/ ou uploads/,
+          // tenta parsear como URL e extrair o pathname, mas sem assumir /uploads/
+          try {
+              const tempUrlObj = new URL(oldUrl);
+              let pathname = tempUrlObj.pathname;
+              if (pathname && !pathname.startsWith('/')) { // Garantir barra inicial se for pathname
+                  pathname = '/' + pathname;
+              }
+              newRelativePath = pathname;
+              updated = true;
+          } catch (e) {
+              console.warn(`Aviso: URL antiga '${oldUrl}' (ID ${arquivo.id}) não pôde ser parseada como URL nem identificada como caminho '/uploads/'. Mantendo como está. Pode precisar de ajuste manual.`);
+              // Se não for atualizado por nenhuma regra, updated permanece false
+          }
       }
 
-      // Constrói a nova URL completa
-      const newUrl = `${FILE_SERVER_URL}${newRelativePath}`;
-
-      if (oldUrl !== newUrl) {
-        arquivo.url = newUrl;
-        await arquivo.save();
-        console.log(`URL atualizada para ID ${arquivo.id}: ${oldUrl} -> ${newUrl}`);
+      // Se a URL foi atualizada ou é uma URL absoluta que não é do File Server, tenta reescrever
+      if (updated || !oldUrl.startsWith(FILE_SERVER_URL)) {
+          const newUrl = `${FILE_SERVER_URL}${newRelativePath}`;
+          if (oldUrl !== newUrl) {
+            arquivo.url = newUrl;
+            await arquivo.save();
+            console.log(`URL atualizada para ID ${arquivo.id}: ${oldUrl} -> ${newUrl}`);
+          } else if (updated) { // Se o script tentou atualizar, mas a URL ficou igual (e não é do File Server)
+             console.log(`URL para ID ${arquivo.id} parecia necessitar de atualização, mas permaneceu inalterada: ${oldUrl}.`);
+          }
       } else {
-        console.log(`URL para ID ${arquivo.id} já estava correta ou não pôde ser adaptada: ${oldUrl}`);
+          console.log(`URL para ID ${arquivo.id} já estava correta: ${oldUrl}`);
       }
     }
 
@@ -108,14 +103,9 @@ async function updateFileUrls() {
   } catch (error) {
     console.error("Erro durante a atualização de URLs:", error);
   } finally {
-    // É importante fechar a conexão no final de um script de uso único
     await sequelize.close();
     process.exit(0);
   }
 }
 
-// Para usar 'path.basename', 'path.parse', etc.
-const path = require('path');
-
-// Executa a função
 updateFileUrls();
