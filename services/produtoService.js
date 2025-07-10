@@ -1,3 +1,5 @@
+// src/services/produtoService.js
+
 const { Produto, ArquivoProduto, Avaliacao, Usuario, ItemPedido, Pedido, Categoria, VariacaoProduto } = require("../models")
 const { Op, fn, col, literal } = require("sequelize")
 
@@ -37,6 +39,19 @@ const produtoService = {
       const produto = await Produto.findByPk(id)
       if (!produto) {
         throw new Error("Produto não encontrado")
+      }
+
+      // NOVO: Lógica para remover arquivos associados (chamar o uploadService)
+      const arquivosAssociados = await ArquivoProduto.findAll({ where: { produtoId: id } });
+      for (const arquivo of arquivosAssociados) {
+          try {
+              // Chama o uploadService para remover do File Server
+              await require('./uploadService').removerArquivo(arquivo.url);
+              await arquivo.destroy(); // Remove do banco de dados
+          } catch (err) {
+              console.warn(`Falha ao remover arquivo ${arquivo.url} do File Server ou DB: ${err.message}`);
+              // Continua a remoção do produto mesmo que o arquivo falhe
+          }
       }
 
       await produto.destroy()
@@ -80,7 +95,6 @@ const produtoService = {
         }
       }
 
-      // Primeiro, contar o número total de produtos
       const totalCount = await Produto.count({ where });
       
       const offset = (page - 1) * limit
@@ -92,8 +106,6 @@ const produtoService = {
         { model: VariacaoProduto, as: 'variacoes', required: false }
       ];
 
-      // Se o número total de produtos for menor ou igual ao limite,
-      // vamos buscar todos os produtos sem paginação
       const findOptions = {
         where,
         include: includeOptions,
@@ -101,7 +113,6 @@ const produtoService = {
         subQuery: false,
       };
       
-      // Só aplicamos limit e offset se tivermos mais produtos que o limite
       if (totalCount > parseInt(limit)) {
         findOptions.limit = parseInt(limit);
         findOptions.offset = offset;
@@ -116,22 +127,23 @@ const produtoService = {
       }
 
       const produtos = await Produto.findAll(findOptions);
-      const baseUrl = process.env.BASE_URL || 'http://localhost:3035';
+      // REMOVIDO: const baseUrl = process.env.BASE_URL || 'http://localhost:3035';
 
       const produtosFormatados = produtos.map(produto => {
         const p = produto.toJSON();
 
+        // URLs já virão completas do ArquivoProduto.url
         p.imagens = (p.ArquivoProdutos || [])
           .filter(arq => arq.tipo === 'imagem')
           .sort((a, b) => (a.principal ? -1 : 1) - (b.principal ? -1 : 1) || a.ordem - b.ordem)
-          .map(arq => new URL(arq.url.replace(/\\/g, '/'), baseUrl).href);
+          .map(arq => arq.url); // Use arq.url diretamente
 
         p.itensDownload = (p.ArquivoProdutos || [])
           .filter(arq => arq.tipo === 'arquivo')
           .map(arq => ({
             id: arq.id,
             nome: arq.nome,
-            url: new URL(arq.url.replace(/\\/g, '/'), baseUrl).href
+            url: arq.url // Use arq.url diretamente
           }));
           
         p.videos = (p.ArquivoProdutos || [])
@@ -139,13 +151,14 @@ const produtoService = {
           .map(arq => ({
             id: arq.id,
             nome: arq.nome,
-            url: new URL(arq.url.replace(/\\/g, '/'), baseUrl).href,
+            url: arq.url, // Use arq.url diretamente
             metadados: arq.metadados
           }));
           
-        p.ArquivoProdutos = (p.ArquivoProdutos || []).map(arq => {
-          return { ...arq, url: new URL(arq.url.replace(/\\/g, '/'), baseUrl).href };
-        });
+        // Não é mais necessário modificar p.ArquivoProdutos individualmente se url já é absoluta
+        // p.ArquivoProdutos = (p.ArquivoProdutos || []).map(arq => {
+        //   return { ...arq, url: new URL(arq.url.replace(/\\/g, '/'), baseUrl).href };
+        // });
 
         return p;
       });
@@ -184,19 +197,20 @@ const produtoService = {
       }
 
       const produtoJSON = produto.toJSON();
-      const baseUrl = process.env.BASE_URL || 'http://localhost:3035';
+      // REMOVIDO: const baseUrl = process.env.BASE_URL || 'http://localhost:3035';
 
+      // URLs já virão completas do ArquivoProduto.url
       produtoJSON.imagens = (produtoJSON.ArquivoProdutos || [])
         .filter(arq => arq.tipo === 'imagem')
         .sort((a, b) => (a.principal === b.principal) ? 0 : a.principal ? -1 : 1)
-        .map(arq => new URL(arq.url.replace(/\\/g, '/'), baseUrl).href);
+        .map(arq => arq.url); // Use arq.url diretamente
 
       produtoJSON.itensDownload = (produtoJSON.ArquivoProdutos || [])
         .filter(arq => arq.tipo === 'arquivo')
         .map(arq => ({
           id: arq.id,
           nome: arq.nome,
-          url: new URL(arq.url.replace(/\\/g, '/'), baseUrl).href
+          url: arq.url // Use arq.url diretamente
         }));
         
       produtoJSON.videos = (produtoJSON.ArquivoProdutos || [])
@@ -204,13 +218,14 @@ const produtoService = {
         .map(arq => ({
           id: arq.id,
           nome: arq.nome,
-          url: new URL(arq.url.replace(/\\/g, '/'), baseUrl).href,
+          url: arq.url, // Use arq.url diretamente
           metadados: arq.metadados
         }));
 
-      produtoJSON.ArquivoProdutos = (produtoJSON.ArquivoProdutos || []).map(arq => {
-        return { ...arq, url: new URL(arq.url.replace(/\\/g, '/'), baseUrl).href };
-      });
+      // Não é mais necessário modificar produtoJSON.ArquivoProdutos individualmente
+      // produtoJSON.ArquivoProdutos = (produtoJSON.ArquivoProdutos || []).map(arq => {
+      //   return { ...arq, url: new URL(arq.url.replace(/\\/g, '/'), baseUrl).href };
+      // });
 
       return produtoJSON;
     } catch (error) {
@@ -218,7 +233,7 @@ const produtoService = {
     }
   },
 
-  async adicionarImagemProduto(produtoId, imagem) {
+  async adicionarImagemProduto(produtoId, imagemInfo) { // Recebe um objeto imagemInfo formatado do uploadService
     try {
       const produto = await Produto.findByPk(produtoId)
       if (!produto) {
@@ -227,11 +242,12 @@ const produtoService = {
 
       const arquivoProduto = await ArquivoProduto.create({
         produtoId,
-        nome: imagem.originalname,
-        url: imagem.path,
-        mimeType: imagem.mimetype,
-        tamanho: imagem.size,
+        nome: imagemInfo.nomeOriginal,
+        url: imagemInfo.url, // URL COMPLETA
+        mimeType: imagemInfo.tipo,
+        tamanho: imagemInfo.tamanho,
         tipo: "imagem",
+        metadados: imagemInfo.metadados // Salva as variantes/metadados retornados do File Server
       })
 
       return arquivoProduto
@@ -240,7 +256,7 @@ const produtoService = {
     }
   },
 
-  async adicionarArquivoProduto(produtoId, arquivo) {
+  async adicionarArquivoProduto(produtoId, arquivoInfo) { // Recebe um objeto arquivoInfo formatado do uploadService
     try {
       const produto = await Produto.findByPk(produtoId)
       if (!produto) {
@@ -249,11 +265,12 @@ const produtoService = {
 
       const arquivoProduto = await ArquivoProduto.create({
         produtoId,
-        nome: arquivo.nomeArquivo,
-        url: arquivo.urlArquivo,
-        mimeType: arquivo.tipo,
-        tamanho: arquivo.tamanho,
-        tipo: 'arquivo'
+        nome: arquivoInfo.nomeOriginal,
+        url: arquivoInfo.url, // URL COMPLETA
+        mimeType: arquivoInfo.tipo,
+        tamanho: arquivoInfo.tamanho,
+        tipo: 'arquivo',
+        metadados: {} // Ou qualquer metadado relevante para arquivos
       })
 
       return arquivoProduto
@@ -272,6 +289,11 @@ const produtoService = {
         throw new Error("Arquivo não encontrado")
       }
 
+      // NOVO: Chamar o uploadService para remover do File Server
+      const uploadService = require('./uploadService'); // Importa aqui para evitar circular dependency
+      await uploadService.removerArquivo(arquivo.url); // Passa a URL completa
+
+      // Excluir do banco de dados
       await arquivo.destroy()
 
       return { message: "Arquivo removido com sucesso" }
@@ -285,7 +307,7 @@ const produtoService = {
       const arquivos = await ArquivoProduto.findAll({
         where: { produtoId },
       })
-
+      // As URLs já virão completas do banco de dados
       return arquivos
     } catch (error) {
       throw error
@@ -304,22 +326,23 @@ const produtoService = {
         limit: parseInt(limit, 10),
       });
 
-      const baseUrl = process.env.BASE_URL || 'http://localhost:3035';
+      // REMOVIDO: const baseUrl = process.env.BASE_URL || 'http://localhost:3035';
       
       const produtosFormatados = produtos.map(produto => {
         const produtoJSON = produto.toJSON();
         
+        // URLs já virão completas do ArquivoProduto.url
         produtoJSON.imagens = (produtoJSON.ArquivoProdutos || [])
           .filter(arq => arq.tipo === 'imagem')
           .sort((a, b) => (a.principal === b.principal) ? 0 : a.principal ? -1 : 1)
-          .map(arq => new URL(arq.url.replace(/\\/g, '/'), baseUrl).href);
+          .map(arq => arq.url);
           
         produtoJSON.itensDownload = (produtoJSON.ArquivoProdutos || [])
           .filter(arq => arq.tipo === 'arquivo')
           .map(arq => ({
             id: arq.id,
             nome: arq.nome,
-            url: new URL(arq.url.replace(/\\/g, '/'), baseUrl).href
+            url: arq.url // Use arq.url diretamente
           }));
           
         produtoJSON.videos = (produtoJSON.ArquivoProdutos || [])
@@ -327,13 +350,14 @@ const produtoService = {
           .map(arq => ({
             id: arq.id,
             nome: arq.nome,
-            url: new URL(arq.url.replace(/\\/g, '/'), baseUrl).href,
+            url: arq.url, // Use arq.url diretamente
             metadados: arq.metadados
           }));
           
-        produtoJSON.ArquivoProdutos = (produtoJSON.ArquivoProdutos || []).map(arq => {
-          return { ...arq, url: new URL(arq.url.replace(/\\/g, '/'), baseUrl).href };
-        });
+        // Não é mais necessário modificar produtoJSON.ArquivoProdutos individualmente
+        // produtoJSON.ArquivoProdutos = (produtoJSON.ArquivoProdutos || []).map(arq => {
+        //   return { ...arq, url: new URL(arq.url.replace(/\\/g, '/'), baseUrl).href };
+        // });
         
         return produtoJSON;
       });
@@ -360,8 +384,11 @@ const produtoService = {
       const contagemDeVendas = pedidos.reduce((acc, pedido) => {
         if (pedido.itens && Array.isArray(pedido.itens)) {
           pedido.itens.forEach(item => {
-            if (item.id && item.quantidade) {
-              acc[item.id] = (acc[item.id] || 0) + item.quantidade;
+            // Se o item.id no pedido é o ID do produto, mantenha.
+            // Se for o ID da variação, você precisa mapear para o produtoId.
+            // Assumindo que item.produtoId é o que você quer contar aqui.
+            if (item.produtoId && item.quantidade) { // Usar item.produtoId
+              acc[item.produtoId] = (acc[item.produtoId] || 0) + item.quantidade;
             }
           });
         }
@@ -394,22 +421,23 @@ const produtoService = {
 
       const produtosNaoFormatados = maisVendidosIds.map(id => produtos.find(p => p.id == id)).filter(p => p);
       
-      const baseUrl = process.env.BASE_URL || 'http://localhost:3035';
+      // REMOVIDO: const baseUrl = process.env.BASE_URL || 'http://localhost:3035';
       
       const produtosFormatados = produtosNaoFormatados.map(produto => {
         const produtoJSON = produto.toJSON();
         
+        // URLs já virão completas do ArquivoProduto.url
         produtoJSON.imagens = (produtoJSON.ArquivoProdutos || [])
           .filter(arq => arq.tipo === 'imagem')
           .sort((a, b) => (a.principal === b.principal) ? 0 : a.principal ? -1 : 1)
-          .map(arq => new URL(arq.url.replace(/\\/g, '/'), baseUrl).href);
+          .map(arq => arq.url);
           
         produtoJSON.itensDownload = (produtoJSON.ArquivoProdutos || [])
           .filter(arq => arq.tipo === 'arquivo')
           .map(arq => ({
             id: arq.id,
             nome: arq.nome,
-            url: new URL(arq.url.replace(/\\/g, '/'), baseUrl).href
+            url: arq.url // Use arq.url diretamente
           }));
           
         produtoJSON.videos = (produtoJSON.ArquivoProdutos || [])
@@ -417,13 +445,14 @@ const produtoService = {
           .map(arq => ({
             id: arq.id,
             nome: arq.nome,
-            url: new URL(arq.url.replace(/\\/g, '/'), baseUrl).href,
+            url: arq.url, // Use arq.url diretamente
             metadados: arq.metadados
           }));
           
-        produtoJSON.ArquivoProdutos = (produtoJSON.ArquivoProdutos || []).map(arq => {
-          return { ...arq, url: new URL(arq.url.replace(/\\/g, '/'), baseUrl).href };
-        });
+        // Não é mais necessário modificar produtoJSON.ArquivoProdutos individualmente
+        // produtoJSON.ArquivoProdutos = (produtoJSON.ArquivoProdutos || []).map(arq => {
+        //   return { ...arq, url: new URL(arq.url.replace(/\\/g, '/'), baseUrl).href };
+        // });
         
         return produtoJSON;
       });
@@ -458,13 +487,14 @@ const produtoService = {
         ],
       });
 
-      const baseUrl = process.env.BASE_URL || 'http://localhost:3035';
+      // REMOVIDO: const baseUrl = process.env.BASE_URL || 'http://localhost:3035';
       const produtosFormatados = relacionados.map(produto => {
         const p = produto.toJSON();
+        // URLs já virão completas do ArquivoProduto.url
         p.imagens = (p.ArquivoProdutos || [])
           .filter(arq => arq.tipo === 'imagem')
           .sort((a, b) => (a.principal ? -1 : 1) - (b.principal ? -1 : 1))
-          .map(arq => new URL(arq.url.replace(/\\/g, '/'), baseUrl).href);
+          .map(arq => arq.url);
         return p;
       });
 

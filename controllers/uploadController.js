@@ -1,93 +1,64 @@
+// src/controllers/uploadController.js
+
 const uploadService = require("../services/uploadService")
 const { ArquivoProduto } = require("../models")
-const { deleteImageVariants } = require("../utils/imageProcessor")
+// deleteImageVariants não é mais usado diretamente aqui
+// const { deleteImageVariants } = require("../utils/imageProcessor") 
 const produtoService = require("../services/produtoService")
-const fs = require("fs")
+const fs = require("fs") // Pode não ser mais necessário para operações diretas de arquivo
 
 const uploadController = {
   /**
-   * Upload de imagem de produto
-   */
-  async uploadProdutoImagem(req, res, next) {
-    try {
-      if (!req.processedImage) {
-        return res.status(400).json({ erro: "Nenhuma imagem processada" })
-      }
-
-      const { produtoId } = req.params
-      const processedImage = req.processedImage
-
-      // Criar registro da imagem no banco
-      const imagem = await ArquivoProduto.create({
-        produtoId,
-        tipo: "imagem",
-        nome: processedImage.filename,
-        url: `/uploads/imagens/medium/${processedImage.filename}.avif`,
-        metadados: {
-          formatos: ["avif", "webp"],
-          tamanhos: Object.keys(processedImage.variants),
-          variantes: processedImage.variants,
-          original: processedImage.original
-        },
-        principal: false, // Por padrão não é a imagem principal
-      })
-
-      res.json(imagem)
-    } catch (error) {
-      next(error)
-    }
-  },
-
-  /**
-   * Upload de múltiplas imagens de produto
+   * Upload de imagem de produto (Múltiplas imagens)
+   * Este endpoint agora espera um array de arquivos e os envia individualmente para o File Server.
    */
   async uploadProdutoImagens(req, res, next) {
     try {
-      if (!req.processedImages || req.processedImages.length === 0) {
-        return res.status(400).json({ erro: "Nenhuma imagem processada" })
+      if (!req.files || req.files.length === 0) {
+        return res.status(400).json({ erro: "Nenhuma imagem enviada para upload." });
       }
 
-      const { produtoId } = req.params
-      const processedImages = req.processedImages
+      const { produtoId } = req.params;
+      const files = req.files; // req.files é usado por multer.array
 
-      // Verificar se já existem imagens para este produto
+      const produto = await produtoService.buscarProdutoPorId(produtoId);
+      if (!produto) {
+        return res.status(404).json({ erro: "Produto não encontrado." });
+      }
+
+      // Verifica se já existem imagens para este produto para definir a primeira como principal
       const imagensExistentes = await ArquivoProduto.findAll({
-        where: { produtoId, tipo: "imagem" }
-      })
+        where: { produtoId, tipo: "imagem" },
+        limit: 1 // Basta saber se existe pelo menos uma
+      });
 
-      // Definir a primeira imagem como principal se não existirem outras
-      let definirComoPrincipal = imagensExistentes.length === 0
+      let definirComoPrincipal = imagensExistentes.length === 0;
+      const imagensCriadas = [];
 
-      // Criar registros para cada imagem
-      const imagens = []
-
-      for (let i = 0; i < processedImages.length; i++) {
-        const processedImage = processedImages[i]
-
+      for (const file of files) {
+        const imagemInfo = await uploadService.processarESalvarImagem(file); // Envia para o File Server
+        
         const imagem = await ArquivoProduto.create({
           produtoId,
           tipo: "imagem",
-          nome: processedImage.filename,
-          url: `/uploads/imagens/medium/${processedImage.filename}.avif`,
-          metadados: {
-            formatos: ["avif", "webp"],
-            tamanhos: Object.keys(processedImage.variants),
-            variantes: processedImage.variants,
-            original: processedImage.original
-          },
+          nome: imagemInfo.nomeOriginal,
+          url: imagemInfo.url, // URL COMPLETA do File Server
+          mimeType: imagemInfo.tipo,
+          tamanho: imagemInfo.tamanho,
+          metadados: imagemInfo.metadados, // Metadados das variantes
           principal: definirComoPrincipal,
-        })
+        });
 
-        imagens.push(imagem)
-        // Apenas a primeira imagem nova será principal
+        imagensCriadas.push(imagem);
         if (definirComoPrincipal) {
-          definirComoPrincipal = false
+          definirComoPrincipal = false;
         }
       }
 
-      res.json(imagens)
+      res.status(201).json(imagensCriadas);
     } catch (error) {
-      next(error)
+      console.error("Erro ao fazer upload de múltiplas imagens do produto:", error);
+      next(error);
     }
   },
 
@@ -97,23 +68,33 @@ const uploadController = {
   async uploadProdutoArquivo(req, res, next) {
     try {
       if (!req.file) {
-        return res.status(400).json({ erro: "Nenhum arquivo enviado" });
+        return res.status(400).json({ erro: "Nenhum arquivo enviado." });
       }
 
       const { produtoId } = req.params;
-      const { file } = req;
+      const file = req.file;
 
+      const produto = await produtoService.buscarProdutoPorId(produtoId);
+      if (!produto) {
+        return res.status(404).json({ erro: "Produto não encontrado." });
+      }
+
+      // Salva arquivo no File Server (tipo 'produtos')
+      const arquivoInfo = await uploadService.salvarArquivo(file, "produtos"); // tipo "produtos" para a pasta do File Server
+
+      // Adicionar arquivo ao produto no banco de dados
       const arquivo = await ArquivoProduto.create({
         produtoId,
+        nome: arquivoInfo.nomeOriginal,
+        url: arquivoInfo.url, // URL COMPLETA
+        mimeType: arquivoInfo.tipo,
+        tamanho: arquivoInfo.tamanho,
         tipo: 'arquivo',
-        nome: file.originalname,
-        url: file.path,
-        mimeType: file.mimetype,
-        tamanho: file.size,
       });
 
       res.status(201).json(arquivo);
     } catch (error) {
+      console.error("Erro ao fazer upload de arquivo digital do produto:", error);
       next(error);
     }
   },
@@ -124,39 +105,33 @@ const uploadController = {
   async uploadProdutoVideo(req, res, next) {
     try {
       if (!req.file) {
-        return res.status(400).json({ erro: "Nenhum vídeo enviado" });
+        return res.status(400).json({ erro: "Nenhum vídeo enviado." });
       }
 
       const { produtoId } = req.params;
-      const { file } = req;
+      const file = req.file;
+
+      const produto = await produtoService.buscarProdutoPorId(produtoId);
+      if (!produto) {
+        return res.status(404).json({ erro: "Produto não encontrado." });
+      }
       
-      // Mover o arquivo para a pasta de vídeos
-      const videoPath = `uploads/videos/${file.filename}`;
-      fs.renameSync(file.path, videoPath);
-      
-      const relativePath = `/${videoPath}`;
-      const baseUrl = process.env.BASE_URL || 'http://localhost:3035';
-      const fullUrl = new URL(relativePath, baseUrl).href;
+      // Salva vídeo no File Server (tipo 'videos')
+      const videoInfo = await uploadService.salvarArquivo(file, "videos"); // tipo "videos" para a pasta do File Server
 
       const video = await ArquivoProduto.create({
         produtoId,
         tipo: 'video',
-        nome: file.originalname,
-        url: relativePath, // Caminho relativo para armazenar no banco
-        mimeType: file.mimetype,
-        tamanho: file.size,
-        metadados: {
-          original: file.filename,
-          fullUrl: fullUrl // URL completa para o frontend
-        }
+        nome: videoInfo.nomeOriginal,
+        url: videoInfo.url, // URL COMPLETA
+        mimeType: videoInfo.tipo,
+        tamanho: videoInfo.tamanho,
+        metadados: videoInfo.metadados || {} // Se houver metadados adicionais do file server
       });
 
-      // Adicionar a URL completa na resposta para o frontend
-      const videoResponse = video.toJSON();
-      videoResponse.fullUrl = fullUrl;
-
-      res.status(201).json(videoResponse);
+      res.status(201).json(video);
     } catch (error) {
+      console.error("Erro ao fazer upload de vídeo do produto:", error);
       next(error);
     }
   },
@@ -166,27 +141,28 @@ const uploadController = {
    */
   async definirImagemPrincipal(req, res, next) {
     try {
-      const { produtoId, arquivoId } = req.params
+      const { produtoId, arquivoId } = req.params;
 
       // Primeiro, remove a flag 'principal' de outras imagens do mesmo produto
       await ArquivoProduto.update(
         { principal: false },
         { where: { produtoId, tipo: "imagem" } }
-      )
+      );
 
       // Depois, define a imagem escolhida como principal
       const [updatedRows] = await ArquivoProduto.update(
         { principal: true },
         { where: { id: arquivoId, produtoId, tipo: "imagem" } }
-      )
+      );
 
       if (updatedRows === 0) {
-        return res.status(404).json({ erro: "Imagem não encontrada" })
+        return res.status(404).json({ erro: "Imagem não encontrada ou não pertence a este produto." });
       }
 
-      res.json({ message: "Imagem principal definida com sucesso" })
+      res.json({ message: "Imagem principal definida com sucesso." });
     } catch (error) {
-      next(error)
+      console.error("Erro ao definir imagem principal:", error);
+      next(error);
     }
   },
 
@@ -195,27 +171,23 @@ const uploadController = {
    */
   async excluirArquivo(req, res, next) {
     try {
-      const { arquivoId } = req.params
-      const arquivo = await ArquivoProduto.findByPk(arquivoId)
+      const { arquivoId } = req.params;
+      const arquivo = await ArquivoProduto.findByPk(arquivoId);
 
       if (!arquivo) {
-        return res.status(404).json({ erro: "Arquivo não encontrado" })
+        return res.status(404).json({ erro: "Arquivo não encontrado." });
       }
 
-      // Excluir do sistema de arquivos
-      if (arquivo.tipo === "imagem" && arquivo.metadados?.variantes) {
-        await deleteImageVariants(arquivo.metadados.variantes)
-      } else {
-        // Para arquivos normais ou imagens sem variantes
-        await uploadService.removerArquivo(arquivo.url)
-      }
+      // NOVO: Chamar o uploadService para remover do File Server
+      await uploadService.removerArquivo(arquivo.url); 
 
       // Excluir do banco de dados
-      await arquivo.destroy()
+      await arquivo.destroy();
 
-      res.json({ message: "Arquivo excluído com sucesso" })
+      res.json({ message: "Arquivo excluído com sucesso." });
     } catch (error) {
-      next(error)
+      console.error("Erro ao excluir arquivo:", error);
+      next(error);
     }
   },
 
@@ -228,10 +200,9 @@ const uploadController = {
       const { ordem } = req.body;
 
       if (!Array.isArray(ordem)) {
-        return res.status(400).json({ erro: "O formato da ordem deve ser um array de IDs" });
+        return res.status(400).json({ erro: "O formato da ordem deve ser um array de IDs." });
       }
 
-      // Atualizar a ordem de cada imagem
       for (let i = 0; i < ordem.length; i++) {
         await ArquivoProduto.update(
           { ordem: i },
@@ -239,7 +210,6 @@ const uploadController = {
         );
       }
 
-      // Retornar as imagens atualizadas
       const imagens = await ArquivoProduto.findAll({
         where: { produtoId, tipo: "imagem" },
         order: [["ordem", "ASC"]]
@@ -247,58 +217,15 @@ const uploadController = {
 
       res.json(imagens);
     } catch (error) {
+      console.error("Erro ao atualizar ordem das imagens:", error);
       next(error);
     }
   },
 
-  async uploadArquivoProduto(req, res, next) {
-    try {
-      uploadService.uploadArquivoProduto(req, res, async (err) => {
-        if (err) {
-          return res.status(400).json({ erro: err.message })
-        }
+  // As funções de otimizarImagem, obterInfoImagem e listarArquivos do uploadService
+  // não serão mais usadas diretamente por um controlador, ou precisarão ser adaptadas
+  // para chamar a API do File Server, se ele oferecer essa funcionalidade.
+  // Elas foram removidas do `uploadService` ou marcadas como `warn`.
+};
 
-        if (!req.file) {
-          return res.status(400).json({ erro: "Nenhum arquivo enviado" })
-        }
-
-        const { produtoId } = req.params
-
-        if (!produtoId) {
-          return res.status(400).json({ erro: "ID do produto é obrigatório" })
-        }
-
-        // Salvar arquivo sem processamento (para produtos digitais)
-        const arquivoInfo = await uploadService.salvarArquivo(req.file, "produto")
-
-        // Adicionar arquivo ao produto
-        const arquivo = await produtoService.adicionarArquivoProduto(produtoId, {
-          nomeArquivo: arquivoInfo.nomeOriginal,
-          urlArquivo: arquivoInfo.url,
-          tamanho: arquivoInfo.tamanho,
-          tipo: arquivoInfo.tipo,
-        })
-
-        res.json(arquivo)
-      })
-    } catch (error) {
-      next(error)
-    }
-  },
-
-  async otimizarImagem(req, res, next) {
-    try {
-      const { caminho } = req.body
-
-      if (!caminho) {
-        return res.status(400).json({ erro: "Caminho é obrigatório" })
-      }
-
-      // ... existing code ...
-    } catch (error) {
-      next(error)
-    }
-  }
-}
-
-module.exports = uploadController
+module.exports = uploadController;

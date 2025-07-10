@@ -1,256 +1,233 @@
-const multer = require("multer")
+// src/services/uploadService.js
+
 const path = require("path")
 const fs = require("fs")
-const imageProcessingService = require("./imageProcessingService")
+const { v4: uuidv4 } = require("uuid")
+const dotenv = require("dotenv")
+const axios = require('axios'); // Importar axios
 
-// Criar diretórios se não existirem
-const criarDiretorios = () => {
-  const dirs = ["uploads", "uploads/produtos", "uploads/imagens", "uploads/videos", "uploads/arquivos"]
+dotenv.config()
 
-  dirs.forEach((dir) => {
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true })
-    }
-  })
-}
+// URL base do seu novo File Server
+// Defina isso como uma variável de ambiente no EasyPanel para o seu backend
+// Ex: FILE_SERVER_URL=https://seuservicodearquivos.easypanel.host
+const FILE_SERVER_URL = process.env.FILE_SERVER_URL || 'http://localhost:8080'; // Porta padrão do file server
 
-criarDiretorios()
+// Remova a criação local de diretórios, o file server fará isso
+// const criarDiretorios = () => { ... }
+// criarDiretorios()
 
-// Configuração de storage para usar memória (para processamento)
-const storage = multer.memoryStorage()
-
-// Filtros de arquivo
-const fileFilter = (req, file, cb) => {
-  // Tipos permitidos
-  const allowedTypes = {
-    image: ["image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp"],
-    video: ["video/mp4", "video/avi", "video/mov", "video/wmv"],
-    document: ["application/pdf", "application/zip", "application/rar"],
-    audio: ["audio/mp3", "audio/wav", "audio/ogg"],
-  }
-
-  const allAllowedTypes = [
-    ...allowedTypes.image,
-    ...allowedTypes.video,
-    ...allowedTypes.document,
-    ...allowedTypes.audio,
-  ]
-
-  if (allAllowedTypes.includes(file.mimetype)) {
-    cb(null, true)
-  } else {
-    cb(new Error(`Tipo de arquivo não permitido: ${file.mimetype}`), false)
-  }
-}
-
-// Configurações do multer
-const uploadConfig = {
-  storage,
-  fileFilter,
-  limits: {
-    fileSize: 500 * 1024 * 1024, // 500MB
-  },
-}
-
-const upload = multer(uploadConfig)
 
 const uploadService = {
-  // Upload único
-  single: (fieldName) => upload.single(fieldName),
+  // Função auxiliar para enviar arquivos para o File Server
+  async sendFileToFileServer(buffer, originalname, type, filename = uuidv4()) {
+    const formData = new FormData();
+    const blob = new Blob([buffer], { type: originalname.mimetype });
+    formData.append('file', blob, originalname.originalname); // filename no multer
 
-  // Upload múltiplo
-  multiple: (fieldName, maxCount = 5) => upload.array(fieldName, maxCount),
+    formData.append('type', type); // Tipo para o file server (imagens, videos, arquivos, produtos)
+    formData.append('filename', filename); // O nome do arquivo que será salvo (UUID)
 
-  // Upload de campos diferentes
-  fields: (fields) => upload.fields(fields),
-
-  // Processar upload de imagem de produto com otimização
-  uploadImagemProduto: upload.single("imagem"),
-
-  // Processar upload de arquivo de produto digital
-  uploadArquivoProduto: upload.single("produto"),
-
-  // Processar upload múltiplo de imagens com otimização
-  uploadMultiplasImagens: upload.array("imagens", 10),
-
-  // Processar e salvar imagem otimizada
-  async processarESalvarImagem(file, tipo = "geral", options = {}) {
     try {
-      if (!imageProcessingService.isValidImage(file.mimetype)) {
-        throw new Error("Arquivo não é uma imagem válida")
-      }
+      const response = await axios.post(`${FILE_SERVER_URL}/upload/${type === 'imagens' ? 'image' : 'file'}`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+          // Opcional: Adicione um token de segurança (x-api-key) se o file server exigir
+          // 'x-api-key': process.env.FILE_SERVER_API_KEY
+        },
+      });
+      return response.data; // Retorna os dados do file server (filename, url, variants etc.)
+    } catch (error) {
+      console.error(`Erro ao enviar arquivo para o File Server (${type}):`, error.response?.data || error.message);
+      throw new Error(`Falha ao carregar arquivo para o servidor de arquivos.`);
+    }
+  },
 
-      const imagesDir = path.join("uploads", "imagens")
+  // Processar e salvar imagem otimizada (agora envia para o File Server)
+  async processarESalvarImagem(file, options = {}) {
+    try {
+      // Aqui, o processamento Sharp AINDA ACONTECE NO SEU BACKEND
+      // Você pode optar por enviar o buffer original e deixar o File Server fazer o Sharp
+      // ou fazer o Sharp aqui e enviar o resultado (para maior controle)
+      // Com base no seu server.js do file-server, ele fará o sharp, então só precisamos enviar o buffer original.
 
-      // Processar imagem para AVIF
-      const fileName = await imageProcessingService.processAndSaveImage(file.buffer, imagesDir, options)
+      // Gerar um UUID para o nome do arquivo, que será repassado para o file server
+      const uniqueFileName = uuidv4(); 
 
-      const filePath = path.join(imagesDir, fileName)
-      const fileStats = fs.statSync(filePath)
-      const relativePath = `/uploads/imagens/${fileName}`
-      const baseUrl = process.env.BASE_URL || 'http://localhost:3035'
+      const result = await this.sendFileToFileServer(file.buffer, file, 'imagens', uniqueFileName);
+
+      // O `mainUrl` já virá do File Server como '/imagens/master/UUID_master.avif'
+      // Precisamos concatenar com a URL base do File Server para ter a URL completa no DB
+      const fullUrl = `${FILE_SERVER_URL}${result.mainUrl}`;
 
       const arquivoInfo = {
         nomeOriginal: file.originalname,
-        nomeArquivo: fileName,
-        caminho: filePath,
-        url: relativePath, // Caminho relativo para armazenar no banco
-        fullUrl: new URL(relativePath, baseUrl).href, // URL completa para o frontend
-        tamanho: fileStats.size,
+        nomeArquivo: result.filename, // O UUID gerado
+        caminho: null, // Não armazenamos mais caminho local
+        url: fullUrl, // URL COMPLETA para armazenar no banco
+        fullUrl: fullUrl, // Mesma URL completa para o frontend
+        tamanho: result.variants.master.avif.size, // Pega o tamanho da versão master AVIF
         tipo: "image/avif", // Sempre AVIF após processamento
-        categoria: tipo,
+        categoria: 'imagem',
         otimizado: true,
-      }
+        // Armazenar metadados das variantes para futuras consultas
+        metadados: result.variants
+      };
 
-      return arquivoInfo
+      return arquivoInfo;
     } catch (error) {
-      throw error
+      throw error;
     }
   },
 
-  // Processar múltiplas imagens
+  // Processar múltiplas imagens (envia uma a uma para o File Server)
   async processarMultiplasImagens(files, options = {}) {
-    try {
-      const imagesDir = path.join("uploads", "imagens")
-      const processedImages = await imageProcessingService.processMultipleImages(files, imagesDir, options)
-      const baseUrl = process.env.BASE_URL || 'http://localhost:3035'
+    const processedImages = [];
+    for (const file of files) {
+      try {
+        const uniqueFileName = uuidv4();
+        const result = await this.sendFileToFileServer(file.buffer, file, 'imagens', uniqueFileName);
+        const fullUrl = `${FILE_SERVER_URL}${result.mainUrl}`;
 
-      return processedImages.map((img) => ({
-        nomeOriginal: img.original,
-        nomeArquivo: img.processed,
-        caminho: img.path,
-        url: img.url, // Já é o caminho relativo
-        fullUrl: new URL(img.url, baseUrl).href, // URL completa para o frontend
-        tamanho: img.size,
-        tipo: "image/avif",
-        categoria: "imagem",
-        otimizado: true,
-      }))
-    } catch (error) {
-      throw error
-    }
-  },
-
-  // Criar variantes de imagem (thumbnails)
-  async criarVariantesImagem(file, baseName) {
-    try {
-      if (!imageProcessingService.isValidImage(file.mimetype)) {
-        throw new Error("Arquivo não é uma imagem válida")
+        processedImages.push({
+          nomeOriginal: file.originalname,
+          nomeArquivo: result.filename,
+          caminho: null,
+          url: fullUrl,
+          fullUrl: fullUrl,
+          tamanho: result.variants.master.avif.size,
+          tipo: "image/avif",
+          categoria: "imagem",
+          otimizado: true,
+          metadados: result.variants
+        });
+      } catch (error) {
+        console.error(`Erro ao processar ${file.originalname}:`, error);
+        // Continuar processando outras imagens mesmo se uma falhar
       }
-
-      const imagesDir = path.join("uploads", "imagens")
-      const variants = await imageProcessingService.createImageVariants(file.buffer, imagesDir, baseName)
-
-      return variants
-    } catch (error) {
-      throw error
     }
+    return processedImages;
   },
 
-  // Salvar arquivo não-imagem (sem processamento)
+  // Criar diferentes tamanhos de imagem (thumbnails) - **Esta função pode ser removida se o File Server já fizer isso**
+  // Se o File Server já retorna as URLs das variantes, esta função se torna redundante.
+  // Mantenho-a aqui caso você queira a capacidade de processar localmente e depois enviar.
+  async criarVariantesImagem(file, baseName) {
+    // Se o `processarESalvarImagem` já retorna variantes do File Server, esta função não é mais necessária como antes.
+    // Ela pode ser adaptada para apenas retornar as URLs das variantes que o File Server já gerou.
+    console.warn("criarVariantesImagem pode ser redundante se o File Server já gerenciar variantes.");
+    // Exemplo de como poderia funcionar se o file server gerou:
+    // Você teria que chamar processarESalvarImagem e extrair as variantes de lá.
+    const result = await this.sendFileToFileServer(file.buffer, file, 'imagens', baseName); // Reusa o baseName como filename
+    const variants = {};
+    for (const sizeName in result.variants) {
+      variants[sizeName] = {};
+      for (const format in result.variants[sizeName]) {
+        variants[sizeName][format] = {
+          fileName: path.basename(result.variants[sizeName][format].path),
+          url: `${FILE_SERVER_URL}${result.variants[sizeName][format].path}`,
+          fullUrl: `${FILE_SERVER_URL}${result.variants[sizeName][format].path}`,
+          size: result.variants[sizeName][format].size,
+          // Não temos as dimensões exatas aqui, a menos que o File Server as retorne
+          dimensions: {} // Preencher se o File Server retornar
+        };
+      }
+    }
+    return variants;
+  },
+
+  // Salvar arquivo não-imagem (envia para o File Server)
   async salvarArquivo(file, tipo = "geral") {
     try {
-      let uploadPath = "uploads/"
-
-      // Definir pasta baseado no tipo de arquivo
+      let fileServerType; // Corresponde aos diretórios do File Server
       if (file.mimetype.startsWith("video/")) {
-        uploadPath += "videos/"
-      } else if (file.fieldname === "produto") {
-        uploadPath += "produtos/"
+        fileServerType = "videos";
+      } else if (file.fieldname === "produto") { // Assumindo produtos digitais
+        fileServerType = "produtos";
       } else {
-        uploadPath += "arquivos/"
+        fileServerType = "arquivos";
       }
-
-      // Criar diretório se não existir
-      if (!fs.existsSync(uploadPath)) {
-        fs.mkdirSync(uploadPath, { recursive: true })
-      }
-
-      const fileName = `${Date.now()}-${Math.round(Math.random() * 1e9)}-${file.originalname}`
-      const filePath = path.join(uploadPath, fileName)
-
-      // Salvar arquivo
-      fs.writeFileSync(filePath, file.buffer)
-
-      const fileStats = fs.statSync(filePath)
-      const relativePath = `/${uploadPath}${fileName}`
-      const baseUrl = process.env.BASE_URL || 'http://localhost:3035'
+      
+      const uniqueFileName = `${uuidv4()}-${file.originalname}`; // Mantém o original name para leitura fácil
+      const result = await this.sendFileToFileServer(file.buffer, file, fileServerType, uniqueFileName);
+      
+      const fullUrl = `${FILE_SERVER_URL}${result.url}`;
 
       const arquivoInfo = {
         nomeOriginal: file.originalname,
-        nomeArquivo: fileName,
-        caminho: filePath,
-        url: relativePath, // Caminho relativo para armazenar no banco
-        fullUrl: new URL(relativePath, baseUrl).href, // URL completa para o frontend
-        tamanho: fileStats.size,
+        nomeArquivo: result.filename, // O nome com UUID
+        caminho: null, // Não armazena mais caminho local
+        url: fullUrl, // URL COMPLETA
+        fullUrl: fullUrl,
+        tamanho: result.size,
         tipo: file.mimetype,
         categoria: tipo,
-        otimizado: false,
-      }
+        otimizado: false, // Otimização não se aplica da mesma forma a não-imagens
+      };
 
-      return arquivoInfo
+      return arquivoInfo;
     } catch (error) {
-      throw error
+      throw error;
     }
   },
 
-  // Remover arquivo do sistema
-  async removerArquivo(caminho) {
+  // Remover arquivo do sistema (agora envia DELETE para o File Server)
+  async removerArquivo(urlDoArquivo) {
     try {
-      if (fs.existsSync(caminho)) {
-        fs.unlinkSync(caminho)
-        return true
-      }
-      return false
-    } catch (error) {
-      console.error("Erro ao remover arquivo:", error)
-      return false
-    }
-  },
-
-  // Otimizar imagem existente
-  async otimizarImagemExistente(imagePath) {
-    try {
-      const outputDir = path.join("uploads", "imagens")
-      const result = await imageProcessingService.optimizeExistingImage(imagePath, outputDir)
-      return result
-    } catch (error) {
-      throw error
-    }
-  },
-
-  // Obter informações de imagem
-  async obterInfoImagem(imagePath) {
-    try {
-      return await imageProcessingService.getImageInfo(imagePath)
-    } catch (error) {
-      throw error
-    }
-  },
-
-  // Listar arquivos de um diretório
-  listarArquivos(diretorio) {
-    try {
-      const caminhoCompleto = path.join("uploads", diretorio)
-      if (!fs.existsSync(caminhoCompleto)) {
-        return []
-      }
-
-      const baseUrl = process.env.BASE_URL || 'http://localhost:3035'
+      // Extrair o caminho relativo e o tipo do arquivo da URL completa
+      const urlObj = new URL(urlDoArquivo);
+      // O caminho será algo como /imagens/thumbnail/UUID_thumbnail.avif
+      const relativePath = urlObj.pathname; 
       
-      return fs.readdirSync(caminhoCompleto).map((arquivo) => {
-        const relativePath = `/${caminhoCompleto}/${arquivo}`
-        return {
-          nome: arquivo,
-          caminho: path.join(caminhoCompleto, arquivo),
-          url: relativePath, // Caminho relativo para armazenar no banco
-          fullUrl: new URL(relativePath, baseUrl).href, // URL completa para o frontend
-        }
-      })
+      // Dividir o caminho para obter o tipo (imagens, videos, arquivos) e o nome do arquivo
+      // Ex: /imagens/master/UUID_master.avif -> type='master', filename='UUID_master.avif'
+      // ou /videos/meu_video.mp4 -> type='videos', filename='meu_video.mp4'
+      const pathParts = relativePath.split('/').filter(Boolean); // Remove partes vazias
+      const type = pathParts[0]; // 'imagens', 'videos', 'arquivos', 'produtos', ou uma variante (small, medium, etc)
+      const filename = pathParts.slice(1).join('/'); // O resto do caminho é o filename
+
+      // Para imagens, precisamos deletar TODAS as variantes.
+      // O File Server `server.js` tem um endpoint `/delete/:type/:filename`.
+      // Ele vai deletar o arquivo específico. Para deletar todas as variantes,
+      // a lógica seria mais complexa e talvez precisasse de um endpoint /delete/image/:baseName.
+      // Por enquanto, esta função só deletará o arquivo exato passado na URL.
+      // Se a URL for da variante "master", só ela será deletada.
+      // Você pode aprimorar o endpoint DELETE no File Server para lidar com isso.
+
+      const response = await axios.delete(`${FILE_SERVER_URL}/delete/${type}/${filename}`, {
+        // Opcional: Adicione um token de segurança
+        // headers: { 'x-api-key': process.env.FILE_SERVER_API_KEY }
+      });
+      return response.status === 200; // Retorna true se a exclusão for bem-sucedida
     } catch (error) {
-      throw error
+      console.error("Erro ao remover arquivo do File Server:", error.response?.data || error.message);
+      return false;
     }
   },
-}
 
-module.exports = uploadService
+  // Otimizar imagem existente (Agora chama o File Server ou o envia para reprocessar)
+  // Esta função pode ser simplificada se o File Server gerenciar a otimização de existentes.
+  async otimizarImagemExistente(imagePath) {
+    console.warn("otimizarImagemExistente: Esta função pode precisar de refatoração para se adequar ao File Server.");
+    // Depende de como seu File Server lida com otimização de imagens já existentes.
+    // Poderia ser um GET para baixar -> otimizar localmente -> re-uploadar.
+    // Ou um endpoint específico no File Server para otimizar um arquivo existente por URL/ID.
+    throw new Error("Função otimizarImagemExistente precisa ser adaptada ao File Server.");
+  },
+
+  // Obter informações da imagem (pode ser obtido da URL ou metadados salvos)
+  async obterInfoImagem(imagePath) {
+    // Se os metadados já estão salvos no ArquivoProduto, você pode retorná-los.
+    // Se precisar de metadados em tempo real de uma URL externa, é mais complexo.
+    console.warn("obterInfoImagem: Esta função pode precisar de adaptação. Metadados do File Server?");
+    throw new Error("Função obterInfoImagem precisa ser adaptada ao File Server.");
+  },
+
+  // Listar arquivos de um diretório (não mais aplicável localmente)
+  listarArquivos(diretorio) {
+    console.warn("listarArquivos: Esta função não é mais aplicável para listagem de arquivos remotos. Use uma API do File Server se precisar listar.");
+    return []; // Não lista arquivos locais
+  },
+};
+
+module.exports = uploadService;

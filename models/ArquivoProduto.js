@@ -1,3 +1,5 @@
+// src/models/ArquivoProduto.js
+
 const { DataTypes } = require("sequelize")
 const { sequelize } = require("../config/database")
 
@@ -29,6 +31,7 @@ const ArquivoProduto = sequelize.define(
     url: {
       type: DataTypes.STRING,
       allowNull: false,
+      // AGORA ARMAZENARÁ A URL COMPLETA DO FILE SERVER
     },
     mimeType: {
       type: DataTypes.STRING,
