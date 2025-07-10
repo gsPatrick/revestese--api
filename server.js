@@ -5,6 +5,9 @@ const rateLimit = require("express-rate-limit")
 require('dotenv').config();
 
 const { sequelize } = require("./config/database")
+// IMPORTANTE: Garanta que todos os modelos sejam carregados antes do sync.
+// O arquivo index.js da pasta models geralmente já faz isso.
+require('./models'); 
 const tratarErros = require("./middleware/tratarErros")
 const swaggerUi = require('swagger-ui-express');
 
@@ -48,7 +51,7 @@ app.use(cors({
 // Rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 500, // máximo 100 requests por IP
+  max: 500, // máximo 500 requests por IP, ajuste se necessário
 })
 app.use(limiter)
 
@@ -105,8 +108,14 @@ async function iniciarServidor() {
     console.log("Conexão com banco de dados estabelecida.")
 
     try {
-      await sequelize.sync()
-      console.log("Modelos sincronizados com o banco de dados.")
+      // --- MUDANÇA PRINCIPAL AQUI ---
+      // Usar { alter: true } para que o Sequelize tente fazer as alterações
+      // necessárias no schema para que ele corresponda aos modelos.
+      // Isso é ideal para desenvolvimento e para criar o schema inicial.
+      // CUIDADO: Em produção, isso pode ser perigoso. Mas para o seu caso agora, é perfeito.
+      await sequelize.sync({ alter: true });
+      console.log("Modelos sincronizados com o banco de dados.");
+
     } catch (syncError) {
       console.error("Erro ao sincronizar modelos:", syncError)
     }

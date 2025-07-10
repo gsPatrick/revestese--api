@@ -9,16 +9,10 @@ if [ -f .env ]; then
 fi
 
 # Function to check if the database is ready
-# We will use sequelize-cli's `db:migrate:status` as a proxy for connection readiness
 wait_for_db() {
   echo "Waiting for database to be ready..."
-  # We need to extract DB connection info from DATABASE_URL
-  # Format: mysql://user:password@host:port/database
-  DB_HOST=$(echo $DATABASE_URL | sed -n 's/.*@\(.*\):.*/\1/p')
-  DB_PORT=$(echo $DATABASE_URL | sed -n 's/.*:\([0-9]*\)\/.*/\1/p')
-
-  # A simple TCP check is a good first step
-  # But sequelize-cli provides a more robust check
+  # A simple check is enough since we won't run complex commands yet.
+  # We can use `db:migrate:status` as a proxy for connection readiness
   until npx sequelize-cli db:migrate:status > /dev/null 2>&1; do
     echo "Database is unavailable - sleeping"
     sleep 2
@@ -30,11 +24,11 @@ wait_for_db() {
 # Call the function to wait for the database
 wait_for_db
 
-# Now that the database is ready, run the migrations
-echo "Running database migrations..."
-npx sequelize-cli db:migrate
+# --- MIGRAÇÕES DESATIVADAS TEMPORARIAMENTE ---
+echo "Skipping database migrations as requested."
+# npx sequelize-cli db:migrate # <-- LINHA PRINCIPAL COMENTADA
 
-echo "Migrations finished."
+echo "Migrations step bypassed."
 
 # Then, execute the main command (passed to the script)
 # This will be `npm start` from your Dockerfile's CMD
