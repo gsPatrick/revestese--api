@@ -108,6 +108,9 @@
   AssinaturaUsuario.belongsTo(EnderecoUsuario, { foreignKey: "enderecoEntregaId", as: "enderecoEntrega" })
 
 
+Pedido.belongsTo(Cupom, { foreignKey: 'cupomAplicadoId', as: 'cupom' });
+Cupom.hasMany(Pedido, { foreignKey: 'cupomAplicadoId' });
+
   // Exportar todos os modelos
   module.exports = {
     Usuario,

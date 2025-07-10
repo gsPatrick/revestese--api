@@ -1,5 +1,3 @@
-# Se for um Dockerfile Node.js padrão, pode parecer algo assim:
-
 # Use uma imagem base Node.js
 FROM node:18-alpine
 
@@ -10,8 +8,8 @@ WORKDIR /usr/src/app
 COPY package*.json ./
 
 # Instale as dependências do projeto
-# Evite --only=production aqui se você precisar de sequelize-cli (dev dependency) em tempo de execução para migrações
-RUN npm install
+# `npm ci` is generally preferred in CI/CD for its speed and reliability
+RUN npm ci
 
 # Copie o restante do código da aplicação
 COPY . .

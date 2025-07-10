@@ -33,10 +33,6 @@ const Pedido = sequelize.define(
       type: DataTypes.STRING,
       allowNull: true,
     },
-    cupomAplicado: {
-      type: DataTypes.STRING,
-      allowNull: true,
-    },
     desconto: {
       type: DataTypes.DECIMAL(10, 2),
       defaultValue: 0,
