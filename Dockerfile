@@ -8,8 +8,8 @@ WORKDIR /usr/src/app
 COPY package*.json ./
 
 # Instale as dependências do projeto
-# `npm ci` is generally preferred in CI/CD for its speed and reliability
-RUN npm ci
+# MUDANÇA AQUI: Revertido para npm install pois package-lock.json está ausente.
+RUN npm install
 
 # Copie o restante do código da aplicação
 COPY . .
