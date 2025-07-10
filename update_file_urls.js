@@ -2,7 +2,7 @@
 
 require('dotenv').config(); // Certifique-se de que seu .env está configurado
 
-const { sequelize, ArquivoProduto } = require('./src/models'); // Ajuste o caminho se necessário
+const { sequelize, ArquivoProduto } = require('./models/index'); // Ajuste o caminho se necessário
 
 async function updateFileUrls() {
   await sequelize.sync(); // Garante que os modelos estão carregados
