@@ -3,7 +3,7 @@
 require('dotenv').config(); // Certifique-se de que seu .env está configurado
 const { sequelize } = require('./config/database');
 
-const { sequelize, ArquivoProduto } = require('./models/index'); // Ajuste o caminho se necessário
+const {ArquivoProduto } = require('./models/index'); // Ajuste o caminho se necessário
 
 async function updateFileUrls() {
   // REMOVIDO: await sequelize.sync(); // Não precisamos sincronizar o DB para atualizar dados
