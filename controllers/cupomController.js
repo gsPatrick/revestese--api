@@ -12,10 +12,11 @@ const cupomController = {
     }
   },
 
-  async validarCupom(req, res, next) {
+   async validarCupom(req, res, next) {
     try {
       const { codigo, total, quantidadeItens } = req.body;
-      const usuarioId = req.usuario ? req.usuario.id : null; // Opcional: ID do usuário logado
+      // ALTERAÇÃO AQUI: Usando req.user para padronizar com o middleware verifyToken
+      const usuarioId = req.user ? req.user.id : null; 
 
       if (!codigo || total === undefined || quantidadeItens === undefined) {
         return res.status(400).json({ erro: "Código, total e quantidade de itens são obrigatórios para validação." });
@@ -41,8 +42,6 @@ const cupomController = {
           tipo: cupom.tipo,
           descontoCalculado: parseFloat(desconto.toFixed(2)),
           novoTotalCalculado: parseFloat(novoTotal.toFixed(2)),
-          // Você pode incluir mais informações se o frontend precisar
-          // ex: cupom.tipoRegra, cupom.valorMinimoPedido, etc.
         },
       })
     } catch (error) {
@@ -65,16 +64,14 @@ const cupomController = {
 
   async aplicarCupom(req, res, next) {
     try {
-      // Este endpoint é mais para simular uma aplicação ou obter o resultado final.
-      // A aplicação real ocorre na criação do pedido.
       const { codigo, total, quantidadeItens } = req.body;
-      const usuarioId = req.usuario ? req.usuario.id : null;
+      // ALTERAÇÃO AQUI: Usando req.user para padronizar
+      const usuarioId = req.user ? req.user.id : null;
 
       if (!codigo || total === undefined || quantidadeItens === undefined) {
         return res.status(400).json({ erro: "Código, total e quantidade de itens são obrigatórios" });
       }
-
-      // `aplicarCupom` já valida e calcula o novo total/desconto
+      
       const resultado = await cupomService.aplicarCupom({ total, quantidadeItens, usuarioId }, codigo);
       res.json(resultado)
     } catch (error) {
