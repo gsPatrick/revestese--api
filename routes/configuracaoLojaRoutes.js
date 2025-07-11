@@ -9,7 +9,6 @@ const router = express.Router()
 router.get("/publicas", configuracaoLojaController.obterConfiguracoes)
 
 // Rotas administrativas
-router.use(autenticar, restringirAdmin)
 
 router.get("/", configuracaoLojaController.obterConfiguracoes)
 router.put("/", configuracaoLojaController.atualizarConfiguracoes)
