@@ -1,16 +1,16 @@
 // src/services/freteService.js
 
-const correiosService = require("./correiosService");
 const { MetodoFrete, Produto, VariacaoProduto } = require("../models");
+const viaCepService = require("./viaCepService"); // <-- NOVO: Importa o serviço do ViaCEP
 
-// <-- NOVA FUNÇÃO AUXILIAR para limpar e normalizar strings para comparação
+// Função auxiliar para limpar e normalizar strings para comparação
 function normalizarString(str) {
   if (typeof str !== 'string') return '';
   return str
-    .trim() // Remove espaços extras no início e fim
-    .toLowerCase() // Converte para minúsculas
-    .normalize('NFD') // Separa os acentos das letras
-    .replace(/[\u0300-\u036f]/g, ''); // Remove os acentos
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
 }
 
 const freteService = {
@@ -19,7 +19,25 @@ const freteService = {
       console.log('=== INÍCIO CÁLCULO FRETE SERVICE ===');
       console.log('Dados recebidos (enderecoDestino):', JSON.stringify(enderecoDestino, null, 2));
 
-      // 1. Lógica para produtos digitais (sem alteração)
+      // <-- INÍCIO DA NOVA LÓGICA DE ROBUSTEZ -->
+      // Se cidade ou estado não foram enviados, mas o CEP foi, busca os dados.
+      if ((!enderecoDestino.cidade || !enderecoDestino.estado) && enderecoDestino.cep) {
+        console.log('Cidade/Estado ausentes. Buscando dados pelo CEP...');
+        try {
+          const dadosViaCep = await viaCepService.buscarEnderecoPorCep(enderecoDestino.cep);
+          // Atualiza o objeto enderecoDestino com os dados encontrados
+          enderecoDestino.cidade = dadosViaCep.cidade;
+          enderecoDestino.estado = dadosViaCep.estado;
+          console.log('Dados do endereço preenchidos via ViaCEP:', JSON.stringify(enderecoDestino, null, 2));
+        } catch (cepError) {
+          console.error('Erro ao buscar CEP para preencher endereço. O cálculo pode falhar.', cepError.message);
+          // Lançar um erro para parar a execução se o CEP for inválido
+          throw new Error(`O CEP informado (${enderecoDestino.cep}) não é válido.`);
+        }
+      }
+      // <-- FIM DA NOVA LÓGICA DE ROBUSTEZ -->
+
+      // 1. Lógica para produtos digitais
       const flagsDigitais = await Promise.all(
         itens.map(async (item) => {
           if (item.variacaoId) {
@@ -44,15 +62,13 @@ const freteService = {
       }
 
       // 2. Lógica para produtos FÍSICOS
-      // <-- CORREÇÃO AQUI: Usando a função de normalização
       const cidadeNormalizada = normalizarString(enderecoDestino.cidade);
       const estadoNormalizado = normalizarString(enderecoDestino.estado);
 
-      console.log(`Cidade Normalizada: "${cidadeNormalizada}" | Estado Normalizado: "${estadoNormalizado}"`);
+      console.log(`Verificando: Cidade Normalizada: "${cidadeNormalizada}" | Estado Normalizado: "${estadoNormalizado}"`);
       
       let opcoesFreteFisico = [];
       
-      // A condição agora é robusta contra acentos, espaços e capitalização
       if (cidadeNormalizada === 'presidente epitacio' && (estadoNormalizado === 'sp' || estadoNormalizado === 'sao paulo')) {
         console.log('CONDIÇÃO VERDADEIRA: Endereço de destino é Presidente Epitácio/SP. Oferecendo Frete Grátis.');
         opcoesFreteFisico.push({
@@ -83,7 +99,8 @@ const freteService = {
     } catch (error) {
       console.error("ERRO GERAL no serviço de frete:", error.message);
       console.error('Detalhes do erro Frete Service:', error.stack);
-      throw new Error("Não foi possível calcular o frete no momento.");
+      // Retorna a mensagem de erro específica para o frontend
+      throw new Error(error.message || "Não foi possível calcular o frete no momento.");
     }
   },
 
