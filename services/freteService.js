@@ -3,35 +3,33 @@
 const correiosService = require("./correiosService");
 const { MetodoFrete, Produto, VariacaoProduto } = require("../models");
 
+// <-- NOVA FUNÇÃO AUXILIAR para limpar e normalizar strings para comparação
+function normalizarString(str) {
+  if (typeof str !== 'string') return '';
+  return str
+    .trim() // Remove espaços extras no início e fim
+    .toLowerCase() // Converte para minúsculas
+    .normalize('NFD') // Separa os acentos das letras
+    .replace(/[\u0300-\u036f]/g, ''); // Remove os acentos
+}
+
 const freteService = {
   async calcularFrete(enderecoOrigem, enderecoDestino, itens) {
     try {
       console.log('=== INÍCIO CÁLCULO FRETE SERVICE ===');
-      console.log('Dados recebidos (enderecoOrigem):', JSON.stringify(enderecoOrigem, null, 2));
       console.log('Dados recebidos (enderecoDestino):', JSON.stringify(enderecoDestino, null, 2));
-      console.log('Dados recebidos (itens):', JSON.stringify(itens, null, 2));
 
-      // 1. Lógica para produtos digitais
+      // 1. Lógica para produtos digitais (sem alteração)
       const flagsDigitais = await Promise.all(
         itens.map(async (item) => {
           if (item.variacaoId) {
             const variacao = await VariacaoProduto.findByPk(item.variacaoId);
-            if (!variacao) {
-              console.warn(`Variação ${item.variacaoId} não encontrada. Tratando como físico.`);
-              return false;
-            }
-            return variacao.digital;
+            return variacao?.digital || false;
           }
-          // Se não tiver variação, assume que é físico (ou ajuste conforme sua regra)
-          // Se o produto em si tem uma flag 'digital', você precisaria verificar Produto.findByPk(item.produtoId) aqui.
-          // Assumindo que produtos SEM variação são físicos por padrão no seu sistema atual.
-          console.warn(`Item ${item.produtoId} sem variaçãoId. Tratando como físico.`);
           return false;
         })
       );
-
       const todosDigitais = flagsDigitais.every(Boolean);
-      console.log('Todos os itens são digitais?', todosDigitais);
 
       if (todosDigitais) {
         console.log('Retornando apenas entrega digital.');
@@ -45,32 +43,34 @@ const freteService = {
         }];
       }
 
-      // 2. Lógica para produtos FÍSICOS: Frete Fixo / Frete Grátis Condicional
-      // Se há itens físicos, ignoramos totalmente o cálculo de peso/dimensões para Correios
-      // e os métodos de frete personalizados.
-      const cidadeDestino = enderecoDestino.cidade;
-      const estadoDestino = enderecoDestino.estado;
+      // 2. Lógica para produtos FÍSICOS
+      // <-- CORREÇÃO AQUI: Usando a função de normalização
+      const cidadeNormalizada = normalizarString(enderecoDestino.cidade);
+      const estadoNormalizado = normalizarString(enderecoDestino.estado);
 
+      console.log(`Cidade Normalizada: "${cidadeNormalizada}" | Estado Normalizado: "${estadoNormalizado}"`);
+      
       let opcoesFreteFisico = [];
-
-      if (cidadeDestino && estadoDestino && cidadeDestino.toLowerCase() === 'presidente epitácio' && estadoDestino.toLowerCase() === 'sp') {
-        console.log('Endereço de destino é Presidente Epitácio/SP. Oferecendo Frete Grátis.');
+      
+      // A condição agora é robusta contra acentos, espaços e capitalização
+      if (cidadeNormalizada === 'presidente epitacio' && (estadoNormalizado === 'sp' || estadoNormalizado === 'sao paulo')) {
+        console.log('CONDIÇÃO VERDADEIRA: Endereço de destino é Presidente Epitácio/SP. Oferecendo Frete Grátis.');
         opcoesFreteFisico.push({
           id: 'frete_gratis_local',
           name: 'Frete Grátis (Entrega Local)',
           price: '0.00',
           company: { name: 'Doodle Dreams' },
-          delivery_time: 2, // Exemplo: 2 dias úteis para entrega local
+          delivery_time: 2,
           custom_description: 'Entrega grátis em Presidente Epitácio/SP.',
         });
       } else {
-        console.log('Endereço de destino não é Presidente Epitácio/SP. Oferecendo Frete Fixo (R$ 9.90).');
+        console.log('CONDIÇÃO FALSA: Endereço de destino não é Presidente Epitácio/SP. Oferecendo Frete Fixo (R$ 9.90).');
         opcoesFreteFisico.push({
           id: 'frete_fixo_nacional',
           name: 'Frete Fixo (Brasil)',
           price: '9.90',
           company: { name: 'Doodle Dreams' },
-          delivery_time: 7, // Exemplo: 7 dias úteis para entrega nacional
+          delivery_time: 7,
           custom_description: 'Valor fixo para todo o Brasil.',
         });
       }
@@ -78,7 +78,6 @@ const freteService = {
       console.log('Opções de frete para produtos físicos:', JSON.stringify(opcoesFreteFisico, null, 2));
       console.log('=== FIM CÁLCULO FRETE SERVICE ===');
 
-      // Retorna as opções de frete fixas/grátis. Não há combinação com Correios ou métodos personalizados.
       return opcoesFreteFisico;
 
     } catch (error) {
@@ -88,9 +87,8 @@ const freteService = {
     }
   },
 
-  // As funções abaixo para Melhor Envio (comentadas) e CRUD de métodos personalizados (ativadas)
-  // permanecem as mesmas, mas não serão invocadas pela função calcularFrete principal.
-  // ...
+  // (O resto do arquivo permanece igual)
+
   async criarMetodoFrete(dados) {
     try {
       const novoMetodo = await MetodoFrete.create(dados);
