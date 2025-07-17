@@ -1,10 +1,12 @@
 // src/services/freteService.js
 
 const { MetodoFrete, Produto, VariacaoProduto } = require("../models");
+const viaCepService = require("./viaCepService");
 
 // Função auxiliar para limpar e normalizar strings para comparação
 function normalizarString(str) {
-  if (typeof str !== 'string') return '';
+  // Garantia extra: se a entrada for nula ou indefinida, retorna string vazia.
+  if (!str) return '';
   return str
     .trim()
     .toLowerCase()
@@ -13,18 +15,30 @@ function normalizarString(str) {
 }
 
 const freteService = {
- async calcularFrete(enderecoOrigem, enderecoDestino, itens) {
+  async calcularFrete(enderecoOrigem, enderecoDestino, itens) {
     try {
-      console.log('=== INÍCIO CÁLCULO FRETE SERVICE ===');
+      console.log('=== INÍCIO DECISÃO DE FRETE ===');
       console.log('Dados recebidos (enderecoDestino):', JSON.stringify(enderecoDestino, null, 2));
 
-      // <-- ADICIONADO: Validação para garantir que o endereço completo foi recebido -->
-      // O frontend DEVE enviar o objeto de endereço completo, não apenas o CEP.
-      if (!enderecoDestino || !enderecoDestino.cidade || !enderecoDestino.estado) {
-        throw new Error("Dados de endereço de destino incompletos. Cidade e Estado são obrigatórios.");
+      // REMOVIDA A VALIDAÇÃO PREMATURA QUE CAUSAVA O ERRO.
+      // A lógica agora prossegue para tentar popular o endereço via CEP.
+
+      // 1. Tenta obter o nome da cidade e estado a partir do CEP, se não existirem.
+      if ((!enderecoDestino.cidade || !enderecoDestino.estado) && enderecoDestino.cep) {
+        console.log('Cidade/Estado ausentes. Tentando buscar dados pelo CEP...');
+        try {
+          const dadosViaCep = await viaCepService.buscarEnderecoPorCep(enderecoDestino.cep);
+          enderecoDestino.cidade = dadosViaCep.cidade;
+          enderecoDestino.estado = dadosViaCep.estado;
+          console.log('Dados do endereço preenchidos via ViaCEP:', JSON.stringify(enderecoDestino, null, 2));
+        } catch (cepError) {
+          // MODIFICADO: Se a consulta ao ViaCEP falhar, apenas avisa no log e continua.
+          // O sistema aplicará o frete fixo como fallback, que é o comportamento desejado.
+          console.warn(`AVISO: A consulta ao ViaCEP para o CEP ${enderecoDestino.cep} falhou. Não será possível verificar o frete grátis local. Oferecendo frete padrão. Erro: ${cepError.message}`);
+        }
       }
 
-      // 1. Lógica para produtos digitais (mantida)
+      // 2. Lógica para produtos digitais (sem frete)
       const flagsDigitais = await Promise.all(
         itens.map(async (item) => {
           if (item.variacaoId) {
@@ -48,9 +62,9 @@ const freteService = {
         }];
       }
 
-      // 2. Lógica para produtos FÍSICOS (mantida, mas agora mais segura)
-      const cidadeNormalizada = normalizarString(enderecoDestino.cidade);
-      const estadoNormalizado = normalizarString(enderecoDestino.estado);
+      // 3. Lógica para produtos FÍSICOS (decide entre grátis local e fixo nacional)
+      const cidadeNormalizada = normalizarString(enderecoDestino.cidade); // Agora seguro, pois normalizarString lida com undefined
+      const estadoNormalizado = normalizarString(enderecoDestino.estado); // Também seguro
 
       console.log(`Verificando: Cidade Normalizada: "${cidadeNormalizada}" | Estado Normalizado: "${estadoNormalizado}"`);
       
@@ -67,7 +81,7 @@ const freteService = {
           custom_description: 'Entrega grátis em Presidente Epitácio/SP.',
         });
       } else {
-        console.log('CONDIÇÃO FALSA: Endereço de destino não é Presidente Epitácio/SP. Oferecendo Frete Fixo (R$ 9.90).');
+        console.log('CONDIÇÃO FALSA: Endereço de destino não é Presidente Epitácio/SP (ou falhou a consulta de CEP). Oferecendo Frete Fixo (R$ 9.90).');
         opcoesFreteFisico.push({
           id: 'frete_fixo_nacional',
           name: 'Frete Fixo (Brasil)',
@@ -79,14 +93,14 @@ const freteService = {
       }
       
       console.log('Opções de frete para produtos físicos:', JSON.stringify(opcoesFreteFisico, null, 2));
-      console.log('=== FIM CÁLCULO FRETE SERVICE ===');
+      console.log('=== FIM DECISÃO DE FRETE ===');
 
       return opcoesFreteFisico;
 
     } catch (error) {
-      console.error("ERRO GERAL no serviço de frete:", error.message);
-      console.error('Detalhes do erro Frete Service:', error.stack);
-      throw new Error(error.message || "Não foi possível calcular o frete no momento.");
+      console.error("ERRO CRÍTICO no serviço de frete:", error.message);
+      // Este erro só deve ser lançado se houver um problema inesperado, não uma falha de validação controlada.
+      throw new Error("Não foi possível calcular o frete. Tente novamente mais tarde.");
     }
   },
 
