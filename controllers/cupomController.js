@@ -12,6 +12,47 @@ const cupomController = {
     }
   },
 
+    async validarCupom(req, res, next) {
+    try {
+      const { codigo, total, quantidadeItens } = req.body;
+      const usuarioId = req.user ? req.user.id : null; 
+
+      if (!codigo || total === undefined || quantidadeItens === undefined) {
+        return res.status(400).json({ erro: "Código, total e quantidade de itens são obrigatórios." });
+      }
+
+      // Chama a função de validação (leitura)
+      const cupom = await cupomService.validarCupom(codigo, total, quantidadeItens, usuarioId);
+      
+      // Calcula o desconto para mostrar ao cliente
+      let desconto = 0;
+      if (cupom.tipo === "percentual") {
+          desconto = (total * cupom.valor) / 100;
+      } else {
+          desconto = cupom.valor;
+      }
+      const novoTotal = Math.max(0, total - desconto);
+
+      // Retorna sucesso com os dados do cupom para a UI
+      res.json({
+        valido: true,
+        cupom: {
+          codigo: cupom.codigo,
+          valor: parseFloat(cupom.valor),
+          tipo: cupom.tipo,
+          descontoCalculado: parseFloat(desconto.toFixed(2)),
+          novoTotalCalculado: parseFloat(novoTotal.toFixed(2)),
+        },
+      });
+    } catch (error) {
+      // Se a validação falhar, retorna o erro
+      res.status(400).json({
+        valido: false,
+        erro: error.message,
+      });
+    }
+  },
+
    async validarCupom(req, res, next) {
     try {
       const { codigo, total, quantidadeItens } = req.body;

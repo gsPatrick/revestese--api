@@ -6,168 +6,107 @@ const pagamentoService = require("./pagamentoService")
 const { Op } = require('sequelize');
 
 const pedidoService = {
-  async criarPedido(usuarioId, itensPedido, enderecoEntrega, freteId, cupomCodigo = null) {
+ async criarPedido(usuarioId, itensPedido, enderecoEntrega, freteId, cupomCodigo = null) {
     try {
       let total = 0;
       let desconto = 0;
       let valorFrete = 0;
       let dadosFrete = null;
-      let cupomAplicadoId = null; // Novo: Para armazenar o ID do cupom
+      let cupomAplicadoId = null; 
 
-      // 1. Lógica para produtos digitais e físicos
+      // Lógica de produtos digitais (sem alteração)
       const verificacoesDigitais = await Promise.all(itensPedido.map(async (item) => {
         if (item.variacaoId) {
-          const variacao = await VariacaoProduto.findOne({
-            where: { id: item.variacaoId, produtoId: item.produtoId }
-          });
-          // Se a variação não existe ou está inativa, trate como físico.
-          if (!variacao || !variacao.ativo) {
-             console.warn(`Variação ${item.variacaoId} não encontrada ou inativa. Tratando como físico.`);
-             return false;
-          }
+          const variacao = await VariacaoProduto.findOne({ where: { id: item.variacaoId, produtoId: item.produtoId }});
+          if (!variacao || !variacao.ativo) return false;
           return variacao.digital;
         }
-        // Se não tiver variação, assume que é físico (ou ajuste conforme sua regra).
-        console.warn(`Item ${item.produtoId} sem variaçãoId. Tratando como físico.`);
         return false; 
       }));
       const todosDigitais = verificacoesDigitais.every(isDigital => isDigital);
-
-      // Se não for pedido totalmente digital, verificar se o enderecoEntrega foi fornecido
       if (!todosDigitais && !enderecoEntrega) {
         throw new Error("Endereço de entrega é obrigatório para produtos físicos.");
       }
-      // O freteId é obrigatório para produtos físicos e será validado pelo freteService.calcularFrete
-      // ou pela nova lógica fixa.
 
-      // Calcular total dos itens e ajustar estoque
+      // Calcular total dos itens e ajustar estoque (sem alteração)
       const itensProcessados = [];
-      let quantidadeTotalItens = 0; // Para a regra de quantidade mínima de produtos do cupom
-
+      let quantidadeTotalItens = 0;
       for (const item of itensPedido) {
         const produto = await Produto.findByPk(item.produtoId);
-        if (!produto || !produto.ativo) {
-          throw new Error(`Produto ${item.produtoId} não encontrado ou inativo.`);
-        }
-
-        let variacao = null;
-        let precoBase;
-        let eDigital = false;
-
+        if (!produto || !produto.ativo) throw new Error(`Produto ${item.produtoId} não encontrado ou inativo.`);
+        let variacao = null; let precoBase; let eDigital = false;
         if (item.variacaoId) {
           variacao = await VariacaoProduto.findOne({ where: { id: item.variacaoId, produtoId: item.produtoId } });
-          if (!variacao || !variacao.ativo) {
-            throw new Error(`Variação ${item.variacaoId} para produto ${produto.nome} não encontrada ou inativa.`);
-          }
-          precoBase = variacao.preco;
-          eDigital = variacao.digital;
-          if (!eDigital && variacao.estoque < item.quantidade) {
-            throw new Error(`Estoque insuficiente para a variação "${variacao.nome}" do produto "${produto.nome}". Disponível: ${variacao.estoque}, Solicitado: ${item.quantidade}.`);
-          }
+          if (!variacao || !variacao.ativo) throw new Error(`Variação ${item.variacaoId} para ${produto.nome} não encontrada ou inativa.`);
+          precoBase = variacao.preco; eDigital = variacao.digital;
+          if (!eDigital && variacao.estoque < item.quantidade) throw new Error(`Estoque insuficiente para a variação "${variacao.nome}".`);
         } else {
-          // Se o produto não tem variações, assume preço e estoque diretos do produto
-          // Assumindo que produto sem variação é físico e tem estoque diretamente nele
-          precoBase = produto.preco; 
-          eDigital = false; 
-          // Se um produto SEM variação for digital, você precisaria de uma flag `digital` no modelo `Produto`.
-          // Pelo seu freteService.js, se não há variacaoId, ele é tratado como físico.
-          if (produto.estoque < item.quantidade) { 
-            throw new Error(`Estoque insuficiente para o produto "${produto.nome}". Disponível: ${produto.estoque}, Solicitado: ${item.quantidade}.`);
-          }
+          precoBase = produto.preco; eDigital = false; 
+          if (produto.estoque < item.quantidade) throw new Error(`Estoque insuficiente para o produto "${produto.nome}".`);
         }
-
-        total += parseFloat(precoBase) * item.quantidade; // Use parseFloat para garantir cálculo correto
-        quantidadeTotalItens += item.quantidade; // Incrementa a quantidade total de itens
-
+        total += parseFloat(precoBase) * item.quantidade;
+        quantidadeTotalItens += item.quantidade;
         itensProcessados.push({
-          produtoId: item.produtoId,
-          variacaoId: item.variacaoId || null,
-          nome: variacao ? `${produto.nome} - ${variacao.nome}` : produto.nome,
-          preco: parseFloat(precoBase),
-          quantidade: item.quantidade,
-          subtotal: parseFloat(precoBase) * item.quantidade,
-          digital: eDigital,
+          produtoId: item.produtoId, variacaoId: item.variacaoId || null, nome: variacao ? `${produto.nome} - ${variacao.nome}` : produto.nome,
+          preco: parseFloat(precoBase), quantidade: item.quantidade, subtotal: parseFloat(precoBase) * item.quantidade, digital: eDigital,
         });
       }
 
-      // Aplicar cupom se fornecido
+      // --- MUDANÇA CRÍTICA AQUI ---
+      // Aplicar cupom se fornecido, fazendo a validação final antes de criar o pedido.
       if (cupomCodigo) {
-        const resultadoCupom = await cupomService.aplicarCupom(
-          { total: total, quantidadeItens: quantidadeTotalItens, usuarioId: usuarioId },
-          cupomCodigo
-        );
-        desconto = resultadoCupom.desconto;
-        total = resultadoCupom.total; // Total já com desconto
-        cupomAplicadoId = resultadoCupom.cupomId; // Armazena o ID do cupom
+        // Valida o cupom com os dados finais do carrinho.
+        const cupom = await cupomService.validarCupom(cupomCodigo, total, quantidadeTotalItens, usuarioId);
+
+        // Se a validação passar (não lançar erro), calcula o desconto.
+        if (cupom.tipo === "percentual") {
+          desconto = (total * cupom.valor) / 100;
+        } else { // tipo === "fixo"
+          desconto = cupom.valor;
+        }
+
+        total = Math.max(0, total - desconto); // Aplica o desconto ao subtotal
+        cupomAplicadoId = cupom.id; // Armazena o ID do cupom para incrementar o uso depois
       }
 
-      // Calcular frete para produtos físicos
+      // Calcular frete para produtos físicos (sem alteração)
       if (!todosDigitais) {
         const freteOpts = await require('./freteService').calcularFrete(
-          await require('./configuracaoLojaService').obterEnderecoOrigem(), // Pega endereço da loja
-          enderecoEntrega,
-          itensPedido.filter((_, index) => !verificacoesDigitais[index]) // Apenas itens físicos
+          await require('./configuracaoLojaService').obterEnderecoOrigem(),
+          enderecoEntrega, itensPedido.filter((_, index) => !verificacoesDigitais[index])
         );
-        
         const freteSelecionado = freteOpts.find(opt => opt.id === freteId);
-        if (!freteSelecionado) {
-          throw new Error("Método de frete selecionado inválido para os itens ou endereço.");
-        }
+        if (!freteSelecionado) throw new Error("Método de frete selecionado inválido.");
         valorFrete = parseFloat(freteSelecionado.price);
-        dadosFrete = {
-          servico: freteSelecionado.name,
-          valor: valorFrete,
-          prazoEntrega: freteSelecionado.delivery_time,
-          statusEntrega: "pendente"
-        };
+        dadosFrete = { servico: freteSelecionado.name, valor: valorFrete, prazoEntrega: freteSelecionado.delivery_time, statusEntrega: "pendente" };
       } else {
-          valorFrete = 0; // Frete sempre zero para produtos totalmente digitais
+          valorFrete = 0;
       }
-
-      // Adicionar valor do frete ao total (se houver)
+      
       const totalFinal = total + valorFrete;
 
-      // Criar o pedido
+      // Criar o pedido (sem alteração)
       const pedido = await Pedido.create({
-        usuarioId,
-        itens: itensProcessados,
-        total: totalFinal,
-        valorFrete: valorFrete,
-        desconto,
-        cupomAplicado: cupomCodigo,
-        cupomAplicadoId: cupomAplicadoId, // Novo campo para o ID do cupom
-        enderecoEntrega: todosDigitais ? null : enderecoEntrega, // Objeto completo de endereço
-        status: "pendente",
+        usuarioId, itens: itensProcessados, total: totalFinal, valorFrete, desconto,
+        cupomAplicado: cupomCodigo, cupomAplicadoId, enderecoEntrega: todosDigitais ? null : enderecoEntrega, status: "pendente",
       });
 
-      // Se o cupom foi aplicado e o pedido foi criado, incrementa o uso
+      // --- MUDANÇA CRÍTICA AQUI ---
+      // Se o cupom foi aplicado e o pedido foi criado, SÓ AGORA incrementa o uso.
       if (cupomAplicadoId) {
         await cupomService.incrementarUso(cupomAplicadoId);
       }
-
-      // Criar o registro de frete apenas para produtos físicos
-      if (dadosFrete && !todosDigitais) {
-        await Frete.create({
-          pedidoId: pedido.id,
-          ...dadosFrete
-        });
-      }
-
-      // Atualizar estoque para produtos físicos ou variações físicas
-      for (const item of itensProcessados) { // Iterar sobre itensProcessados (já validados)
-        if (!item.digital) { // Só reduz estoque se não for digital
+      
+      // Criar registro de frete e atualizar estoque (sem alteração)
+      if (dadosFrete && !todosDigitais) await Frete.create({ pedidoId: pedido.id, ...dadosFrete });
+      for (const item of itensProcessados) {
+        if (!item.digital) {
             if (item.variacaoId) {
                 const variacao = await VariacaoProduto.findByPk(item.variacaoId);
-                if (variacao) { // Verifica se a variação ainda existe
-                    variacao.estoque -= item.quantidade;
-                    await variacao.save();
-                }
+                if (variacao) { variacao.estoque -= item.quantidade; await variacao.save(); }
             } else {
                 const produto = await Produto.findByPk(item.produtoId);
-                if (produto) { // Para produtos sem variação
-                    produto.estoque -= item.quantidade;
-                    await produto.save();
-                }
+                if (produto) { produto.estoque -= item.quantidade; await produto.save(); }
             }
         }
       }
@@ -175,8 +114,6 @@ const pedidoService = {
       return pedido;
     } catch (error) {
       console.error("Erro ao criar pedido:", error);
-      // Se a criação do pedido falhou após incrementar o uso do cupom, você pode querer decrementar.
-      // Isso seria mais robusto com transações no Sequelize. Por simplicidade, fica assim.
       throw error;
     }
   },
@@ -297,52 +234,37 @@ const pedidoService = {
       throw error
     }
   },
-
-   async cancelarPedido(pedidoId) {
+ async cancelarPedido(pedidoId) {
     try {
       const pedido = await Pedido.findByPk(pedidoId)
-      if (!pedido) {
-        throw new Error("Pedido não encontrado")
-      }
+      if (!pedido) throw new Error("Pedido não encontrado")
+      if (pedido.status === "entregue") throw new Error("Não é possível cancelar pedido já entregue")
 
-      if (pedido.status === "entregue") {
-        throw new Error("Não é possível cancelar pedido já entregue")
-      }
-
-      // Se o pedido tinha um cupom aplicado, decrementa o uso antes de mudar o status
-      // A regra de decremento é que ele deve ter um cupomAplicadoId e não ter sido cancelado ainda.
+      // Se o pedido tinha um cupom e NÃO estava cancelado, devolve o uso.
       if (pedido.cupomAplicadoId && pedido.status !== "cancelado") {
         await cupomService.decrementarUso(pedido.cupomAplicadoId);
       }
 
-      // Restaurar estoque (apenas para itens não digitais)
+      // Restaurar estoque (código existente)
       for (const item of pedido.itens) {
-        if (!item.digital) { // Verifica a flag digital no item do pedido
+        if (!item.digital) {
           if (item.variacaoId) {
             const variacao = await VariacaoProduto.findByPk(item.variacaoId)
-            if (variacao) { // Verifica se a variação existe
-              variacao.estoque += item.quantidade
-              await variacao.save()
-            }
+            if (variacao) { variacao.estoque += item.quantidade; await variacao.save() }
           } else {
             const produto = await Produto.findByPk(item.produtoId)
-            if (produto) { // Para produtos sem variação
-              produto.estoque += item.quantidade
-              await produto.save()
-            }
+            if (produto) { produto.estoque += item.quantidade; await produto.save() }
           }
         }
       }
 
       pedido.status = "cancelado"
       await pedido.save()
-
       return pedido
     } catch (error) {
       throw error
     }
   },
-
 
   async verificarSeUsuarioComprouProduto(usuarioId, produtoId) {
     try {

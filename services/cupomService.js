@@ -4,31 +4,26 @@ const { Cupom, Pedido, Usuario } = require("../models"); // Importar Pedido e Us
 const { Op, fn, col, literal } = require("sequelize"); // Importar operadores do Sequelize
 
 const cupomService = {
-  async criarCupom(dados) {
+ async criarCupom(dados) {
     try {
-      // Garante que só um cupom seja principal por vez antes de criar
       if (dados.isPrincipal) {
         await Cupom.update({ isPrincipal: false }, { where: { isPrincipal: true } });
       }
       const cupom = await Cupom.create(dados);
       return cupom;
     } catch (error) {
-      console.error("Erro ao criar cupom:", error.message);
       if (error.name === 'SequelizeUniqueConstraintError' && error.fields.isPrincipal) {
         throw new Error("Já existe um cupom marcado como principal. Por favor, desative-o antes de marcar outro.");
       }
       throw error;
     }
   },
-
   /**
-   * Valida um cupom com base em diversas regras.
-   * @param {string} codigo - Código do cupom.
-   * @param {number} totalPedido - Total atual do pedido (antes do frete/cupom).
-   * @param {number} quantidadeItens - Quantidade total de itens no pedido.
-   * @param {number} [usuarioId=null] - ID do usuário (opcional, para cupons de primeira compra).
+   * --- MUDANÇA CRÍTICA AQUI ---
+   * Esta função agora é SOMENTE para validação (leitura).
+   * Ela verifica se um cupom pode ser usado, mas NÃO incrementa seu uso.
    * @returns {Promise<Cupom>} O objeto Cupom validado.
-   * @throws {Error} Se o cupom for inválido ou não atender às regras.
+   * @throws {Error} Se o cupom for inválido.
    */
   async validarCupom(codigo, totalPedido, quantidadeItens, usuarioId = null) {
     try {
@@ -36,7 +31,7 @@ const cupomService = {
         where: {
           codigo,
           ativo: true,
-          validade: { [Op.gte]: new Date() }, // Validade por data
+          validade: { [Op.gte]: new Date() },
         },
       });
 
@@ -44,7 +39,7 @@ const cupomService = {
         throw new Error("Cupom inválido ou expirado.");
       }
 
-      // Verifica uso máximo
+      // Verifica se o limite de uso JÁ foi atingido.
       if (cupom.usoAtual >= cupom.usoMaximo) {
         throw new Error("Este cupom já atingiu o limite máximo de usos.");
       }
@@ -52,84 +47,61 @@ const cupomService = {
       // Regras Específicas
       switch (cupom.tipoRegra) {
         case "primeira_compra":
-          if (!usuarioId) {
-            throw new Error("Este cupom é exclusivo para novos clientes. Faça login para usá-lo.");
-          }
+          if (!usuarioId) throw new Error("Este cupom é exclusivo para novos clientes. Faça login para usá-lo.");
           const pedidosAnteriores = await Pedido.count({
-            where: {
-              usuarioId: usuarioId,
-              status: {
-                [Op.in]: ["pago", "processando", "enviado", "entregue"], // Pedidos que contam como compra realizada
-              },
-            },
+            where: { usuarioId, status: { [Op.in]: ["pago", "processando", "enviado", "entregue"] } },
           });
-          if (pedidosAnteriores > 0) {
-            throw new Error("Este cupom é válido apenas para sua primeira compra.");
-          }
+          if (pedidosAnteriores > 0) throw new Error("Este cupom é válido apenas para sua primeira compra.");
           break;
 
         case "valor_minimo_pedido":
-          if (totalPedido < cupom.valorMinimoPedido) {
-            throw new Error(`Este cupom é válido apenas para pedidos acima de R$ ${parseFloat(cupom.valorMinimoPedido).toFixed(2).replace('.', ',')}.`);
-          }
+          if (totalPedido < cupom.valorMinimoPedido) throw new Error(`Este cupom é válido para pedidos acima de R$ ${parseFloat(cupom.valorMinimoPedido).toFixed(2).replace('.', ',')}.`);
           break;
 
         case "quantidade_minima_produtos":
-          if (quantidadeItens < cupom.quantidadeMinimaProdutos) {
-            throw new Error(`Este cupom é válido apenas para compras com ${cupom.quantidadeMinimaProdutos} ou mais produtos.`);
-          }
+          if (quantidadeItens < cupom.quantidadeMinimaProdutos) throw new Error(`Este cupom é válido para compras com ${cupom.quantidadeMinimaProdutos} ou mais produtos.`);
           break;
         
-        case "social_media":
-            // Não há validação extra aqui, apenas a flag `invisivel` é relevante.
-            break;
-
-        case "geral":
-        default:
-          // Sem regras adicionais específicas, apenas as básicas (ativo, validade, uso máximo)
+        case "social_media": case "geral": default:
           break;
       }
 
+      // Se todas as validações passaram, retorna o objeto do cupom para cálculo do desconto.
       return cupom;
     } catch (error) {
-      console.error("Erro na validação do cupom:", error.message);
+      console.error("Erro na validação do cupom (leitura):", error.message);
       throw error;
+    }
+  },
+
+/**
+   * Incrementa o contador de uso de um cupom.
+   * Chamado APENAS quando um pedido é criado com sucesso.
+   */
+  async incrementarUso(cupomId) {
+    try {
+      // Usamos o método 'increment' do Sequelize para uma operação atômica.
+      await Cupom.increment('usoAtual', { by: 1, where: { id: cupomId } });
+      console.log(`Uso do cupom ID ${cupomId} incrementado.`);
+    } catch (error) {
+      console.error("Erro ao incrementar uso do cupom:", error.message);
     }
   },
 
   /**
-   * Aplica o desconto de um cupom ao total do pedido.
-   * @param {object} pedidoData - Objeto contendo total, quantidadeItens, e usuarioId (antes do frete).
-   * @param {string} codigo - Código do cupom a ser aplicado.
-   * @returns {Promise<object>} Objeto com o novo total, desconto e cupom aplicado.
-   * @throws {Error} Se o cupom for inválido ou não aplicável.
+   * Decrementa o contador de uso de um cupom.
+   * Chamado quando um pedido é cancelado.
    */
-  async aplicarCupom(pedidoData, codigo) {
-    const { total: totalBase, quantidadeItens, usuarioId } = pedidoData;
+  async decrementarUso(cupomId) {
     try {
-      // 1. Validar o cupom com todas as regras
-      const cupom = await this.validarCupom(codigo, totalBase, quantidadeItens, usuarioId);
-
-      let desconto = 0;
-      if (cupom.tipo === "percentual") {
-        desconto = (totalBase * cupom.valor) / 100;
-      } else { // tipo === "fixo"
-        desconto = cupom.valor;
-      }
-
-      const novoTotal = Math.max(0, totalBase - desconto);
-
-      return {
-        total: parseFloat(novoTotal.toFixed(2)),
-        desconto: parseFloat(desconto.toFixed(2)),
-        cupomAplicado: cupom.codigo,
-        cupomId: cupom.id // Retorna o ID do cupom para facilitar a atualização de uso
-      };
+      // Usamos o método 'decrement' do Sequelize.
+      await Cupom.decrement('usoAtual', { by: 1, where: { id: cupomId, usoAtual: { [Op.gt]: 0 } } });
+      console.log(`Uso do cupom ID ${cupomId} decrementado.`);
     } catch (error) {
-      console.error("Erro ao aplicar cupom:", error.message);
-      throw error;
+      console.error("Erro ao decrementar uso do cupom:", error.message);
     }
   },
+  
 
   /**
    * Incrementa o contador de uso de um cupom.
