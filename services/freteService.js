@@ -1,7 +1,6 @@
 // src/services/freteService.js
 
 const { MetodoFrete, Produto, VariacaoProduto } = require("../models");
-const viaCepService = require("./viaCepService"); // <-- NOVO: Importa o serviço do ViaCEP
 
 // Função auxiliar para limpar e normalizar strings para comparação
 function normalizarString(str) {
@@ -14,30 +13,18 @@ function normalizarString(str) {
 }
 
 const freteService = {
-  async calcularFrete(enderecoOrigem, enderecoDestino, itens) {
+ async calcularFrete(enderecoOrigem, enderecoDestino, itens) {
     try {
       console.log('=== INÍCIO CÁLCULO FRETE SERVICE ===');
       console.log('Dados recebidos (enderecoDestino):', JSON.stringify(enderecoDestino, null, 2));
 
-      // <-- INÍCIO DA NOVA LÓGICA DE ROBUSTEZ -->
-      // Se cidade ou estado não foram enviados, mas o CEP foi, busca os dados.
-      if ((!enderecoDestino.cidade || !enderecoDestino.estado) && enderecoDestino.cep) {
-        console.log('Cidade/Estado ausentes. Buscando dados pelo CEP...');
-        try {
-          const dadosViaCep = await viaCepService.buscarEnderecoPorCep(enderecoDestino.cep);
-          // Atualiza o objeto enderecoDestino com os dados encontrados
-          enderecoDestino.cidade = dadosViaCep.cidade;
-          enderecoDestino.estado = dadosViaCep.estado;
-          console.log('Dados do endereço preenchidos via ViaCEP:', JSON.stringify(enderecoDestino, null, 2));
-        } catch (cepError) {
-          console.error('Erro ao buscar CEP para preencher endereço. O cálculo pode falhar.', cepError.message);
-          // Lançar um erro para parar a execução se o CEP for inválido
-          throw new Error(`O CEP informado (${enderecoDestino.cep}) não é válido.`);
-        }
+      // <-- ADICIONADO: Validação para garantir que o endereço completo foi recebido -->
+      // O frontend DEVE enviar o objeto de endereço completo, não apenas o CEP.
+      if (!enderecoDestino || !enderecoDestino.cidade || !enderecoDestino.estado) {
+        throw new Error("Dados de endereço de destino incompletos. Cidade e Estado são obrigatórios.");
       }
-      // <-- FIM DA NOVA LÓGICA DE ROBUSTEZ -->
 
-      // 1. Lógica para produtos digitais
+      // 1. Lógica para produtos digitais (mantida)
       const flagsDigitais = await Promise.all(
         itens.map(async (item) => {
           if (item.variacaoId) {
@@ -61,7 +48,7 @@ const freteService = {
         }];
       }
 
-      // 2. Lógica para produtos FÍSICOS
+      // 2. Lógica para produtos FÍSICOS (mantida, mas agora mais segura)
       const cidadeNormalizada = normalizarString(enderecoDestino.cidade);
       const estadoNormalizado = normalizarString(enderecoDestino.estado);
 
@@ -99,7 +86,6 @@ const freteService = {
     } catch (error) {
       console.error("ERRO GERAL no serviço de frete:", error.message);
       console.error('Detalhes do erro Frete Service:', error.stack);
-      // Retorna a mensagem de erro específica para o frontend
       throw new Error(error.message || "Não foi possível calcular o frete no momento.");
     }
   },
