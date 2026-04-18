@@ -13,5 +13,7 @@ router.put('/carrinho/convertido', ctrl.marcarConvertido);
 router.get('/acessos',                verifyToken, isAdmin, ctrl.getAcessos);
 router.get('/produtos-vistos',        verifyToken, isAdmin, ctrl.getProdutosVistos);
 router.get('/carrinhos-abandonados',  verifyToken, isAdmin, ctrl.getCarrinhosAbandonados);
+router.get('/clientes',               verifyToken, isAdmin, ctrl.getClientes);
+router.get('/clientes/:id',           verifyToken, isAdmin, ctrl.getClienteDetalhe);
 
 module.exports = router;

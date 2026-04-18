@@ -117,7 +117,9 @@ const pedidoController = {
 
   async listarPedidosAdmin(req, res, next) {
     try {
-      const pedidos = await pedidoService.listarPedidos(null, req.query);
+      // Permite filtrar por usuário via query param (para a tela de clientes)
+      const usuarioId = req.query.usuarioId ? parseInt(req.query.usuarioId) : null;
+      const pedidos = await pedidoService.listarPedidos(usuarioId, req.query);
       res.json(pedidos);
     } catch (error) {
       next(error);
