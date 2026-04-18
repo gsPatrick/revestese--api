@@ -56,7 +56,7 @@ const freteService = {
           id: 'digital_delivery',
           name: 'Entrega Digital',
           price: '0.00',
-          company: { name: 'Doodle Dreams' },
+          company: { name: 'Reveste-se' },
           delivery_time: 0,
           custom_description: 'Seu produto será entregue por e-mail e estará disponível para download na sua conta.',
         }];
@@ -76,7 +76,7 @@ const freteService = {
           id: 'frete_gratis_local',
           name: 'Frete Grátis (Entrega Local)',
           price: '0.00',
-          company: { name: 'Doodle Dreams' },
+          company: { name: 'Reveste-se' },
           delivery_time: 2,
           custom_description: 'Entrega grátis em Presidente Epitácio/SP.',
         });
@@ -86,7 +86,7 @@ const freteService = {
           id: 'frete_fixo_nacional',
           name: 'Frete Fixo (Brasil)',
           price: '9.90',
-          company: { name: 'Doodle Dreams' },
+          company: { name: 'Reveste-se' },
           delivery_time: 7,
           custom_description: 'Valor fixo para todo o Brasil.',
         });

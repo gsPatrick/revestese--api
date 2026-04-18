@@ -144,7 +144,7 @@ const authService = {
         headers: {
           'Accept': 'application/json',
           'Content-Type': 'application/json',
-          'User-Agent': `DoodleDreamsApp-Debug (${ME_CONTACT_EMAIL})`
+          'User-Agent': `RevesteSe-Debug (${ME_CONTACT_EMAIL})`
         }
       });
 

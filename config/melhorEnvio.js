@@ -43,7 +43,7 @@ async function getValidToken() {
         'Accept': 'application/json',
         'Content-Type': 'application/json',
         // O CABEÇALHO CRUCIAL QUE ESTAVA FALTANDO:
-        'User-Agent': `DoodleDreamsApp (${process.env.ADMIN_EMAIL || 'contato@doodledreams.com.br'})`
+        'User-Agent': `RevesteSe (${process.env.ADMIN_EMAIL || 'contato@reveste-se.com.br'})`
       }
     });
 
@@ -78,7 +78,7 @@ const melhorEnvioClient = async () => {
       'Accept': 'application/json',
       'Authorization': `Bearer ${token}`,
       // O CABEÇALHO CRUCIAL QUE ESTAVA FALTANDO:
-      'User-Agent': `DoodleDreamsApp (${process.env.ADMIN_EMAIL || 'contato@doodledreams.com.br'})`
+      'User-Agent': `RevesteSe (${process.env.ADMIN_EMAIL || 'contato@reveste-se.com.br'})`
     }
   });
 };

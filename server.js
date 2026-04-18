@@ -7,7 +7,9 @@ require('dotenv').config();
 const { sequelize } = require("./config/database")
 // IMPORTANTE: Garanta que todos os modelos sejam carregados antes do sync.
 // O arquivo index.js da pasta models geralmente já faz isso.
-require('./models'); 
+require('./models');
+const bcrypt = require('bcryptjs');
+const { Usuario } = require('./models');
 const tratarErros = require("./middleware/tratarErros")
 const swaggerUi = require('swagger-ui-express');
 
@@ -120,11 +122,35 @@ async function iniciarServidor() {
       console.error("Erro ao sincronizar modelos:", syncError)
     }
 
+    await garantirAdminPadrao();
+
     app.listen(PORT, () => {
       console.log(`Servidor rodando na porta ${PORT}`)
     })
   } catch (error) {
     console.error("Erro ao conectar com banco de dados:", error)
+  }
+}
+
+async function garantirAdminPadrao() {
+  try {
+    const ADMIN_EMAIL = 'reveste-se@admin.com';
+    const ADMIN_SENHA = 'admin123';
+
+    const existe = await Usuario.findOne({ where: { email: ADMIN_EMAIL } });
+    if (!existe) {
+      const senhaHash = await bcrypt.hash(ADMIN_SENHA, 10);
+      await Usuario.create({
+        nome: 'Administrador',
+        email: ADMIN_EMAIL,
+        senhaHash,
+        tipo: 'admin',
+        ativo: true,
+      });
+      console.log(`Admin padrão criado: ${ADMIN_EMAIL}`);
+    }
+  } catch (err) {
+    console.error('Erro ao garantir admin padrão:', err.message);
   }
 }
 
