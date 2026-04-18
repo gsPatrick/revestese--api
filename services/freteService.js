@@ -1,106 +1,160 @@
 // src/services/freteService.js
 
+const axios = require('axios');
 const { MetodoFrete, Produto, VariacaoProduto } = require("../models");
 const viaCepService = require("./viaCepService");
 
-// Função auxiliar para limpar e normalizar strings para comparação
+const FRENET_API_URL = 'https://api.frenet.com.br/shipping/quote';
+const FRENET_TOKEN   = process.env.FRENET_TOKEN;
+const ORIGEM_CEP     = process.env.ORIGEM_CEP || '19280000';
+
 function normalizarString(str) {
-  // Garantia extra: se a entrada for nula ou indefinida, retorna string vazia.
   if (!str) return '';
-  return str
-    .trim()
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '');
+  return str.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+function limparCep(cep) {
+  return (cep || '').replace(/\D/g, '');
+}
+
+// Busca produto com dimensões no banco
+async function obterDimensoesProduto(produtoId) {
+  const produto = await Produto.findByPk(produtoId, {
+    attributes: ['peso', 'largura', 'altura', 'comprimento'],
+  });
+  return {
+    Weight:   parseFloat(produto?.peso)        || 0.3,
+    Length:   parseFloat(produto?.comprimento) || 30,
+    Height:   parseFloat(produto?.altura)      || 5,
+    Width:    parseFloat(produto?.largura)     || 20,
+  };
 }
 
 const freteService = {
   async calcularFrete(enderecoOrigem, enderecoDestino, itens) {
     try {
-      console.log('=== INÍCIO DECISÃO DE FRETE ===');
-      console.log('Dados recebidos (enderecoDestino):', JSON.stringify(enderecoDestino, null, 2));
-
-      // REMOVIDA A VALIDAÇÃO PREMATURA QUE CAUSAVA O ERRO.
-      // A lógica agora prossegue para tentar popular o endereço via CEP.
-
-      // 1. Tenta obter o nome da cidade e estado a partir do CEP, se não existirem.
-      if ((!enderecoDestino.cidade || !enderecoDestino.estado) && enderecoDestino.cep) {
-        console.log('Cidade/Estado ausentes. Tentando buscar dados pelo CEP...');
-        try {
-          const dadosViaCep = await viaCepService.buscarEnderecoPorCep(enderecoDestino.cep);
-          enderecoDestino.cidade = dadosViaCep.cidade;
-          enderecoDestino.estado = dadosViaCep.estado;
-          console.log('Dados do endereço preenchidos via ViaCEP:', JSON.stringify(enderecoDestino, null, 2));
-        } catch (cepError) {
-          // MODIFICADO: Se a consulta ao ViaCEP falhar, apenas avisa no log e continua.
-          // O sistema aplicará o frete fixo como fallback, que é o comportamento desejado.
-          console.warn(`AVISO: A consulta ao ViaCEP para o CEP ${enderecoDestino.cep} falhou. Não será possível verificar o frete grátis local. Oferecendo frete padrão. Erro: ${cepError.message}`);
-        }
-      }
-
-      // 2. Lógica para produtos digitais (sem frete)
+      // 1. Produtos 100% digitais — sem frete
       const flagsDigitais = await Promise.all(
         itens.map(async (item) => {
           if (item.variacaoId) {
-            const variacao = await VariacaoProduto.findByPk(item.variacaoId);
-            return variacao?.digital || false;
+            const v = await VariacaoProduto.findByPk(item.variacaoId);
+            return v?.digital || false;
           }
           return false;
         })
       );
-      const todosDigitais = flagsDigitais.every(Boolean);
-
-      if (todosDigitais) {
-        console.log('Retornando apenas entrega digital.');
+      if (flagsDigitais.every(Boolean)) {
         return [{
           id: 'digital_delivery',
           name: 'Entrega Digital',
           price: '0.00',
           company: { name: 'Reveste-se' },
           delivery_time: 0,
-          custom_description: 'Seu produto será entregue por e-mail e estará disponível para download na sua conta.',
+          custom_description: 'Seu produto será enviado por e-mail após a confirmação do pagamento.',
         }];
       }
 
-      // 3. Lógica para produtos FÍSICOS (decide entre grátis local e fixo nacional)
-      const cidadeNormalizada = normalizarString(enderecoDestino.cidade); // Agora seguro, pois normalizarString lida com undefined
-      const estadoNormalizado = normalizarString(enderecoDestino.estado); // Também seguro
+      // 2. Preenche cidade/estado do destino via ViaCEP se ausentes
+      if ((!enderecoDestino.cidade || !enderecoDestino.estado) && enderecoDestino.cep) {
+        try {
+          const dados = await viaCepService.buscarEnderecoPorCep(enderecoDestino.cep);
+          enderecoDestino.cidade = dados.cidade;
+          enderecoDestino.estado = dados.estado;
+        } catch (_) {}
+      }
 
-      console.log(`Verificando: Cidade Normalizada: "${cidadeNormalizada}" | Estado Normalizado: "${estadoNormalizado}"`);
-      
-      let opcoesFreteFisico = [];
-      
-      if (cidadeNormalizada === 'presidente epitacio' && (estadoNormalizado === 'sp' || estadoNormalizado === 'sao paulo')) {
-        console.log('CONDIÇÃO VERDADEIRA: Endereço de destino é Presidente Epitácio/SP. Oferecendo Frete Grátis.');
-        opcoesFreteFisico.push({
+      // 3. Entrega local grátis — Presidente Epitácio/SP
+      const cidadeNorm = normalizarString(enderecoDestino.cidade);
+      const estadoNorm = normalizarString(enderecoDestino.estado);
+      if (cidadeNorm === 'presidente epitacio' && (estadoNorm === 'sp' || estadoNorm === 'sao paulo')) {
+        return [{
           id: 'frete_gratis_local',
-          name: 'Frete Grátis (Entrega Local)',
+          name: 'Entrega Local Grátis',
           price: '0.00',
           company: { name: 'Reveste-se' },
-          delivery_time: 2,
-          custom_description: 'Entrega grátis em Presidente Epitácio/SP.',
-        });
-      } else {
-        console.log('CONDIÇÃO FALSA: Endereço de destino não é Presidente Epitácio/SP (ou falhou a consulta de CEP). Oferecendo Frete Fixo (R$ 9.90).');
-        opcoesFreteFisico.push({
-          id: 'frete_fixo_nacional',
-          name: 'Frete Fixo (Brasil)',
-          price: '9.90',
-          company: { name: 'Reveste-se' },
-          delivery_time: 7,
-          custom_description: 'Valor fixo para todo o Brasil.',
-        });
+          delivery_time: 1,
+          custom_description: 'Entrega gratuita em Presidente Epitácio/SP.',
+        }];
       }
-      
-      console.log('Opções de frete para produtos físicos:', JSON.stringify(opcoesFreteFisico, null, 2));
-      console.log('=== FIM DECISÃO DE FRETE ===');
 
-      return opcoesFreteFisico;
+      // 4. Cotação via Frenet
+      const cepDestino = limparCep(enderecoDestino.cep);
+      const cepOrigem  = limparCep(ORIGEM_CEP);
+
+      if (!cepDestino || cepDestino.length !== 8) {
+        throw new Error('CEP de destino inválido.');
+      }
+
+      // Monta array de itens com dimensões reais do produto
+      const shippingItems = await Promise.all(
+        itens.map(async (item) => {
+          const dims = await obterDimensoesProduto(item.produtoId);
+          return { ...dims, Quantity: item.quantidade || 1 };
+        })
+      );
+
+      // Calcula valor total estimado (usado como ShipmentInvoiceValue)
+      const valorTotal = itens.reduce((sum, item) => {
+        const preco = parseFloat(item.preco) || 50;
+        return sum + preco * (item.quantidade || 1);
+      }, 0);
+
+      const payload = {
+        SellerCEP:             cepOrigem,
+        RecipientCEP:          cepDestino,
+        ShipmentInvoiceValue:  valorTotal || 50,
+        ShippingItemArray:     shippingItems,
+      };
+
+      console.log('[Frenet] Payload:', JSON.stringify(payload));
+
+      const { data } = await axios.post(FRENET_API_URL, payload, {
+        headers: {
+          'token':        FRENET_TOKEN,
+          'Content-Type': 'application/json',
+          'Accept':       'application/json',
+        },
+        timeout: 15000,
+      });
+
+      console.log('[Frenet] Resposta:', JSON.stringify(data?.ShippingSevicesArray?.length), 'serviços');
+
+      const servicos = (data?.ShippingSevicesArray || []).filter(s => !s.Error);
+
+      if (servicos.length === 0) {
+        // Fallback se Frenet não retornar opções
+        return [{
+          id: 'frete_fallback',
+          name: 'Entrega Padrão',
+          price: '19.90',
+          company: { name: 'Correios' },
+          delivery_time: 10,
+          custom_description: 'Prazo estimado de entrega.',
+        }];
+      }
+
+      // Normaliza resposta da Frenet para o formato do sistema
+      return servicos.map(s => ({
+        id:            s.ServiceCode || s.CarrierCode,
+        name:          `${s.Carrier} - ${s.ServiceDescription}`,
+        price:         parseFloat(s.ShippingPrice).toFixed(2),
+        company:       { name: s.Carrier },
+        delivery_time: parseInt(s.DeliveryTime) || 7,
+        carrier_code:  s.CarrierCode,
+        service_code:  s.ServiceCode,
+      }));
 
     } catch (error) {
-      console.error("ERRO CRÍTICO no serviço de frete:", error.message);
-      // Este erro só deve ser lançado se houver um problema inesperado, não uma falha de validação controlada.
-      throw new Error("Não foi possível calcular o frete. Tente novamente mais tarde.");
+      console.error('[Frenet] Erro ao calcular frete:', error.message);
+      // Fallback seguro em caso de falha na API
+      return [{
+        id: 'frete_fallback',
+        name: 'Entrega Padrão',
+        price: '19.90',
+        company: { name: 'Correios' },
+        delivery_time: 10,
+        custom_description: 'Cotação temporariamente indisponível. Valor estimado.',
+      }];
     }
   },
 
