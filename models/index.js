@@ -18,6 +18,8 @@
   const AssinaturaUsuario = require("./AssinaturaUsuario")
   const PlanoAssinaturaProduto = require("./PlanoAssinaturaProduto") // Importar a tabela pivot
   const VariacaoProduto = require("./VariacaoProduto")
+  const Acesso = require("./Acesso")
+  const CarrinhoAbandonado = require("./CarrinhoAbandonado")
 
 
   // Definir associações PRINCIPAIS no arquivo index.js
@@ -131,5 +133,6 @@ Cupom.hasMany(Pedido, { foreignKey: 'cupomAplicadoId' });
     AssinaturaUsuario,
     PlanoAssinaturaProduto,
     VariacaoProduto,
-    // Adicionar outros modelos aqui se houver
+    Acesso,
+    CarrinhoAbandonado,
   };
