@@ -41,9 +41,19 @@ const subscriptionRoutes = require("./routes/subscriptionRoutes")
 const app = express()
 
 // ── Webhook MercadoPago ─────────────────────────────────────────────────────
-// Registrado ANTES de qualquer middleware. Aceita qualquer método/body.
+// Registrado ANTES de qualquer middleware, com CORS próprio.
 app.all('/api/pagamentos/webhook', (req, res) => {
-  // Processar em background sem bloquear a resposta
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', '*');
+  res.header('Access-Control-Max-Age', '86400');
+
+  // Responde preflight imediatamente
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
+  // Processa POST em background sem bloquear a resposta
   if (req.method === 'POST') {
     let body = '';
     req.on('data', chunk => { body += chunk; });
@@ -55,6 +65,7 @@ app.all('/api/pagamentos/webhook', (req, res) => {
       } catch (_) {}
     });
   }
+
   res.status(200).json({ message: 'ok' });
 });
 // ───────────────────────────────────────────────────────────────────────────
