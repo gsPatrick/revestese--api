@@ -110,14 +110,8 @@ async function iniciarServidor() {
     console.log("Conexão com banco de dados estabelecida.")
 
     try {
-      // --- MUDANÇA PRINCIPAL AQUI ---
-      // Usar { alter: true } para que o Sequelize tente fazer as alterações
-      // necessárias no schema para que ele corresponda aos modelos.
-      // Isso é ideal para desenvolvimento e para criar o schema inicial.
-      // CUIDADO: Em produção, isso pode ser perigoso. Mas para o seu caso agora, é perfeito.
-  
+      await sequelize.sync({ alter: true });
       console.log("Modelos sincronizados com o banco de dados.");
-
     } catch (syncError) {
       console.error("Erro ao sincronizar modelos:", syncError)
     }
