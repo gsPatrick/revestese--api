@@ -2,33 +2,34 @@
 
 require("dotenv").config() // ESTA LINHA É CRUCIAL E DEVE ESTAR NO TOPO DESTE ARQUIVO
 
+const dbConfig = process.env.DATABASE_URL
+  ? { url: process.env.DATABASE_URL }
+  : {
+      username: process.env.DB_USER,
+      password: process.env.DB_PASS,
+      database: process.env.DB_NAME,
+      host:     process.env.DB_HOST,
+      port:     Number(process.env.DB_PORT) || 3306,
+    };
+
 module.exports = {
   development: {
-    url: process.env.DATABASE_URL,
+    ...dbConfig,
     dialect: "mysql",
-    dialectOptions: {
-      ssl: false, // Sem SSL para desenvolvimento local
-    },
-    logging: console.log, // Loga as queries SQL no console durante o desenvolvimento
+    dialectOptions: { ssl: false },
+    logging: console.log,
   },
   test: {
-    url: process.env.DATABASE_URL,
+    ...dbConfig,
     dialect: "mysql",
-    dialectOptions: {
-      ssl: false, // Sem SSL para ambiente de testes
-    },
-    logging: false, // Sem logs de queries em testes
+    dialectOptions: { ssl: false },
+    logging: false,
   },
   production: {
-    url: process.env.DATABASE_URL,
+    ...dbConfig,
     dialect: "mysql",
-    dialectOptions: {
-      ssl: {
-        require: false, // Não obriga SSL, mas permite se o servidor oferecer
-        rejectUnauthorized: false // Ignora a validação do certificado (comum em hosts internos ou certificados autoassinados)
-      },
-    },
-    logging: false, // Sem logs de queries em produção
+    dialectOptions: { ssl: { require: false, rejectUnauthorized: false } },
+    logging: false,
   },
   jwtSecret: process.env.JWT_SECRET || 'sua_chave_secreta', // Chave secreta para JWT
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '24h', // Tempo de expiração padrão para tokens JWT
