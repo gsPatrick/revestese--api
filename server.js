@@ -40,6 +40,20 @@ const subscriptionRoutes = require("./routes/subscriptionRoutes")
 
 const app = express()
 
+// ── Webhook MercadoPago ─────────────────────────────────────────────────────
+// Registrado ANTES de qualquer middleware (helmet, rate-limit, etc.)
+// para garantir que o MercadoPago nunca receba 403.
+app.post('/api/pagamentos/webhook', express.json(), async (req, res) => {
+  try {
+    const pagamentoService = require('./services/pagamentoService');
+    await pagamentoService.processarWebhook(req.body);
+  } catch (err) {
+    console.error('Erro no webhook MP:', err.message);
+  }
+  res.status(200).json({ message: 'Webhook recebido' });
+});
+// ───────────────────────────────────────────────────────────────────────────
+
 // Middleware de segurança
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" }
