@@ -1,7 +1,7 @@
 // src/services/freteService.js
 
 const axios = require('axios');
-const { MetodoFrete, Produto, VariacaoProduto } = require("../models");
+const { MetodoFrete, Produto, VariacaoProduto, ConfiguracaoLoja } = require("../models");
 const viaCepService = require("./viaCepService");
 
 const FRENET_API_URL = 'https://api.frenet.com.br/shipping/quote';
@@ -33,6 +33,19 @@ async function obterDimensoesProduto(produtoId) {
 const freteService = {
   async calcularFrete(enderecoOrigem, enderecoDestino, itens) {
     try {
+      // 0. Verificar se frete grátis está ativado globalmente
+      const cfgFreteGratis = await ConfiguracaoLoja.findOne({ where: { chave: 'FRETE_GRATIS' } });
+      if (cfgFreteGratis && cfgFreteGratis.valor === 'true') {
+        return [{
+          id: 'frete_gratis',
+          name: 'Frete Grátis',
+          price: '0.00',
+          company: { name: 'Reveste-se' },
+          delivery_time: 7,
+          custom_description: 'Promoção especial: frete grátis para todo o Brasil!',
+        }];
+      }
+
       // 1. Produtos 100% digitais — sem frete
       const flagsDigitais = await Promise.all(
         itens.map(async (item) => {
