@@ -90,18 +90,6 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
-// Rate limit estrito para criação de pedidos — máx 10 tentativas por IP a cada 5 min
-const pedidoLimiter = rateLimit({
-  windowMs: 5 * 60 * 1000,
-  max: 10,
-  message: { erro: "Muitas tentativas de compra. Aguarde alguns minutos e tente novamente." },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-app.use("/api/pedidos", (req, res, next) => {
-  if (req.method === "POST") return pedidoLimiter(req, res, next);
-  next();
-});
 
 // Middleware para parsing
 app.use(express.json({ limit: "500mb" }))
