@@ -14,7 +14,7 @@ const categoriaController = {
 
     async criarCategoria(req, res, next) {
         try {
-            const { nome, descricao, ativo = true } = req.body
+            const { nome, descricao, icone, ativo = true } = req.body
 
             if (!nome) {
                 return res.status(400).json({ erro: "Nome da categoria é obrigatório" })
@@ -29,6 +29,7 @@ const categoriaController = {
             const categoria = await Categoria.create({
                 nome,
                 descricao,
+                icone: icone || 'GiHanger',
                 ativo
             })
 
@@ -56,7 +57,7 @@ const categoriaController = {
     async atualizarCategoria(req, res, next) {
         try {
             const { id } = req.params
-            const { nome, descricao, ativo } = req.body
+            const { nome, descricao, icone, ativo } = req.body
 
             const categoria = await Categoria.findByPk(id)
             if (!categoria) {
@@ -74,6 +75,7 @@ const categoriaController = {
             // Atualizar dados
             if (nome) categoria.nome = nome
             if (descricao !== undefined) categoria.descricao = descricao
+            if (icone !== undefined) categoria.icone = icone
             if (ativo !== undefined) categoria.ativo = ativo
 
             await categoria.save()

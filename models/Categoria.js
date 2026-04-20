@@ -24,6 +24,11 @@ const Categoria = sequelize.define(
       type: DataTypes.TEXT,
       allowNull: true,
     },
+    icone: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      defaultValue: 'GiHanger',
+    },
     ativo: {
       type: DataTypes.BOOLEAN,
       defaultValue: true,
