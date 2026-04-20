@@ -38,6 +38,7 @@ const viaCepRoutes = require("./routes/viaCepRoutes")
 const relatorioRoutes = require("./routes/relatorioRoutes")
 const subscriptionRoutes = require("./routes/subscriptionRoutes")
 const analyticsRoutes    = require("./routes/analyticsRoutes")
+const videoRoutes        = require("./routes/videoRoutes")
 
 const app = express()
 
@@ -119,9 +120,10 @@ app.use("/api/cep", viaCepRoutes)
 app.use("/api/relatorios", relatorioRoutes)
 app.use("/api/subscriptions", subscriptionRoutes)
 app.use("/api/analytics",    analyticsRoutes)
+app.use("/api/admin/videos", videoRoutes)
 
 // Servir arquivos estáticos da pasta uploads
-app.use("/uploads", express.static("uploads"))
+app.use("/uploads", express.static(path.join(__dirname, "uploads")))
 
 // Middleware de tratamento de erros
 app.use(tratarErros)

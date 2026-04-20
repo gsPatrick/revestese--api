@@ -1,6 +1,9 @@
 # Use uma imagem base Node.js
 FROM node:18-alpine
 
+# Instala ffmpeg (inclui ffprobe) necessário para encoding de vídeo
+RUN apk add --no-cache ffmpeg
+
 # Defina o diretório de trabalho dentro do contêiner
 WORKDIR /usr/src/app
 
