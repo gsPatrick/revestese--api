@@ -1,3 +1,4 @@
+const path = require('path');
 const { Categoria } = require("../models")
 
 const categoriaController = {
@@ -83,6 +84,21 @@ const categoriaController = {
             res.json(categoria)
         } catch (error) {
             next(error)
+        }
+    },
+
+    async uploadIcone(req, res, next) {
+        try {
+            if (!req.processedImage) {
+                return res.status(400).json({ erro: 'Nenhuma imagem enviada.' });
+            }
+            // Usa a variante medium/webp como URL do ícone
+            const url = req.processedImage.variants?.medium?.webp?.path
+                     || req.processedImage.variants?.small?.webp?.path
+                     || `/uploads/imagens/medium/${req.processedImage.filename}.webp`;
+            res.json({ url });
+        } catch (error) {
+            next(error);
         }
     },
 
