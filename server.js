@@ -62,9 +62,14 @@ app.all('/api/pagamentos/webhook', (req, res) => {
     req.on('end', () => {
       try {
         const payload = body ? JSON.parse(body) : {};
+        console.log(`[WEBHOOK RAW] POST /webhook | IP: ${req.ip} | body: ${body.substring(0, 300)}`);
         const pagamentoService = require('./services/pagamentoService');
-        pagamentoService.processarWebhook(payload).catch(() => {});
-      } catch (_) {}
+        pagamentoService.processarWebhook(payload).catch(err =>
+          console.error(`[WEBHOOK RAW] Erro background: ${err.message}`)
+        );
+      } catch (err) {
+        console.error(`[WEBHOOK RAW] Erro parse: ${err.message} | body: ${body.substring(0, 200)}`);
+      }
     });
   }
 

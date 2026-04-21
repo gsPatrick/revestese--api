@@ -5,12 +5,14 @@ const pagamentoController = {
     try {
       const { pedidoId } = req.body
       const usuarioId = req.usuario.id
+      console.log(`[API] POST /pagamentos/checkout | usuário #${usuarioId} | pedido #${pedidoId} | IP: ${req.ip}`);
 
       if (!pedidoId) {
         return res.status(400).json({ erro: "ID do pedido é obrigatório" })
       }
 
       const checkout = await pagamentoService.criarCheckoutPro(pedidoId, usuarioId)
+      console.log(`[API]   Checkout gerado | checkoutUrl: ${checkout.checkoutUrl}`);
       res.json(checkout)
     } catch (error) {
       next(error)

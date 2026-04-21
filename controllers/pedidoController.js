@@ -9,7 +9,8 @@ require("dotenv").config()
 const pedidoController = {
  async criarPedido(req, res, next) {
     try {
-      const usuarioId = req.usuario.id; // Obtido do middleware verifyToken
+      console.log(`[API] POST /pedidos | usuário #${req.usuario?.id} | IP: ${req.ip}`);
+      const usuarioId = req.usuario.id;
       // Agora extraímos diretamente 'itens', 'cupomCodigo', 'enderecoEntrega', 'freteId'
       const { itens, cupomCodigo, enderecoEntrega, freteId } = req.body; // <-- Corrigido aqui, esperando objeto enderecoEntrega
 

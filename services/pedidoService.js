@@ -14,6 +14,12 @@ const pedidoService = {
   // evitar overselling mesmo com 50+ compradores simultâneos.
   // ─────────────────────────────────────────────────────────────────────────────
   async criarPedido(usuarioId, itensPedido, enderecoEntrega, freteId, cupomCodigo = null) {
+    console.log(`\n${'─'.repeat(60)}`);
+    console.log(`[PEDIDO] ▶ Iniciando criação | usuário #${usuarioId}`);
+    console.log(`[PEDIDO]   Itens: ${JSON.stringify(itensPedido.map(i => ({ id: i.produtoId, var: i.variacaoId, qty: i.quantidade })))}`);
+    console.log(`[PEDIDO]   Frete ID: ${freteId || 'nenhum'} | Cupom: ${cupomCodigo || 'nenhum'}`);
+    console.log(`[PEDIDO]   Endereço CEP: ${enderecoEntrega?.cep || 'digital'}`);
+
     const t = await sequelize.transaction({
       isolationLevel: Transaction.ISOLATION_LEVELS.READ_COMMITTED,
     });
@@ -82,16 +88,21 @@ const pedidoService = {
         });
       }
 
+      console.log(`[PEDIDO]   Subtotal itens: R$ ${total.toFixed(2)} | Qtd total: ${quantidadeTotalItens} | Digital: ${todosDigitais}`);
+
       // 3. Validar e aplicar cupom (somente leitura; incremento atômico depois)
       if (cupomCodigo) {
+        console.log(`[PEDIDO]   Validando cupom "${cupomCodigo}"...`);
         const cupom = await cupomService.validarCupom(cupomCodigo, total, quantidadeTotalItens, usuarioId);
         desconto = cupom.tipo === "percentual" ? (total * cupom.valor) / 100 : cupom.valor;
         total = Math.max(0, total - desconto);
         cupomAplicadoId = cupom.id;
+        console.log(`[PEDIDO]   Cupom OK | desconto: R$ ${desconto.toFixed(2)} | total após cupom: R$ ${total.toFixed(2)}`);
       }
 
       // 4. Calcular frete
       if (!todosDigitais) {
+        console.log(`[PEDIDO]   Calculando frete para CEP ${enderecoEntrega?.cep}...`);
         const freteOpts = await require('./freteService').calcularFrete(
           await require('./configuracaoLojaService').obterEnderecoOrigem(),
           enderecoEntrega,
@@ -106,9 +117,11 @@ const pedidoService = {
           prazoEntrega: freteSelecionado.delivery_time,
           statusEntrega: "pendente",
         };
+        console.log(`[PEDIDO]   Frete selecionado: ${dadosFrete.servico} | R$ ${valorFrete.toFixed(2)} | ${dadosFrete.prazoEntrega}d`);
       }
 
       const totalFinal = total + valorFrete;
+      console.log(`[PEDIDO]   TOTAL FINAL: R$ ${totalFinal.toFixed(2)} (itens: R$ ${total.toFixed(2)} + frete: R$ ${valorFrete.toFixed(2)} - desc: R$ ${desconto.toFixed(2)})`);
 
       // 5. Criar o pedido (dentro da transaction)
       const pedido = await Pedido.create({
@@ -162,12 +175,15 @@ const pedidoService = {
 
       // 9. Commit — tudo OK
       await t.commit();
+      console.log(`[PEDIDO] ✅ Pedido #${pedido.id} criado com sucesso | status: ${pedido.status}`);
+      console.log(`${'─'.repeat(60)}\n`);
 
       return pedido;
 
     } catch (error) {
       await t.rollback();
-      console.error("Erro ao criar pedido (rollback aplicado):", error.message);
+      console.error(`[PEDIDO] ❌ ERRO — rollback aplicado: ${error.message}`);
+      console.log(`${'─'.repeat(60)}\n`);
       throw error;
     }
   },
@@ -176,6 +192,7 @@ const pedidoService = {
   // ATUALIZAR STATUS
   // ─────────────────────────────────────────────────────────────────────────────
   async atualizarStatusPedido(pedidoId, status) {
+    console.log(`[PEDIDO] 🔄 Atualizando pedido #${pedidoId} → status "${status}"`);
     const pedido = await Pedido.findByPk(pedidoId, { include: [{ model: Usuario }] });
     if (!pedido) throw new Error("Pedido não encontrado");
 

@@ -27,6 +27,8 @@ function formatDateToPreference(date) {
 
 const pagamentoService = {
   async criarCheckoutPro(pedidoId, usuarioId) {
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`[MP CHECKOUT] ▶ Criando preferência | Pedido #${pedidoId} | Usuário #${usuarioId}`);
     try {
       const pedido = await Pedido.findOne({
         where: { id: pedidoId, usuarioId },
@@ -34,12 +36,17 @@ const pagamentoService = {
       })
 
       if (!pedido) {
+        console.error(`[MP CHECKOUT] ❌ Pedido #${pedidoId} não encontrado`);
         throw new Error("Pedido não encontrado")
       }
 
       if (pedido.status !== "pendente") {
+        console.warn(`[MP CHECKOUT] ⚠️  Pedido #${pedidoId} já foi processado (status: ${pedido.status})`);
         throw new Error("Pedido já foi processado")
       }
+
+      console.log(`[MP CHECKOUT]   Cliente: ${pedido.Usuario?.nome} (${pedido.Usuario?.email})`);
+      console.log(`[MP CHECKOUT]   Total: R$ ${parseFloat(pedido.total).toFixed(2)} | Frete: R$ ${parseFloat(pedido.valorFrete || 0).toFixed(2)}`);
 
       const items = pedido.itens.map((item) => ({
         id: item.produtoId.toString(),
@@ -79,7 +86,16 @@ const pagamentoService = {
         expiration_date_to: formatDateToPreference(new Date(Date.now() + 24 * 60 * 60 * 1000)),
       }
 
+      console.log(`[MP CHECKOUT]   notification_url: ${preference.notification_url}`);
+      console.log(`[MP CHECKOUT]   back_urls: ${JSON.stringify(preference.back_urls)}`);
+      console.log(`[MP CHECKOUT]   Itens: ${preference.items.map(i => `"${i.title}" x${i.quantity} R$${i.unit_price}`).join(' | ')}`);
+      console.log(`[MP CHECKOUT]   Enviando para MercadoPago...`);
+
       const response = await mercadopago.preferences.create(preference)
+
+      console.log(`[MP CHECKOUT] ✅ Preferência criada | ID: ${response.body.id}`);
+      console.log(`[MP CHECKOUT]   checkout URL: ${response.body.init_point}`);
+      console.log(`${'='.repeat(60)}\n`);
 
       await Pagamento.create({
         pedidoId,
@@ -97,135 +113,138 @@ const pagamentoService = {
         sandboxUrl: response.body.sandbox_init_point,
       }
     } catch (error) {
-      console.error("Erro ao criar checkout:", error)
+      console.error(`[MP CHECKOUT] ❌ ERRO ao criar checkout:`, error.message || error);
+      console.log(`${'='.repeat(60)}\n`);
       throw error
     }
   },
 
   async processarWebhook(dados) {
+    const line = '*'.repeat(60);
+    console.log(`\n${line}`);
+    console.log(`[WEBHOOK] ▶ Recebido | type: ${dados.type} | action: ${dados.action || 'n/a'}`);
+    console.log(`[WEBHOOK]   Payload raw: ${JSON.stringify(dados)}`);
     try {
-      const { type, data, action } = dados;
+      const { type, data } = dados;
 
       if (type === "payment") {
-        const paymentId = data.id
+        const paymentId = data?.id;
+        console.log(`[WEBHOOK]   payment_id: ${paymentId} — consultando MercadoPago...`);
 
-        const payment = await mercadopago.payment.findById(paymentId)
-        const paymentData = payment.body
+        const payment = await mercadopago.payment.findById(paymentId);
+        const paymentData = payment.body;
 
-        const pedidoId = paymentData.external_reference
+        console.log(`[WEBHOOK]   MP status: "${paymentData.status}" | detail: "${paymentData.status_detail}"`);
+        console.log(`[WEBHOOK]   Valor: R$ ${paymentData.transaction_amount} | Método: ${paymentData.payment_type_id}/${paymentData.payment_method_id}`);
+        console.log(`[WEBHOOK]   Pagador: ${paymentData.payer?.email || 'n/a'}`);
+        console.log(`[WEBHOOK]   external_reference (pedidoId): ${paymentData.external_reference}`);
+
+        const pedidoId = paymentData.external_reference;
 
         if (!pedidoId) {
-          console.log("Webhook sem external_reference")
-          return
+          console.warn(`[WEBHOOK] ⚠️  Nenhum external_reference — ignorando`);
+          console.log(`${line}\n`);
+          return;
         }
 
         const pagamento = await Pagamento.findOne({
           where: { pedidoId },
-          include: [{ 
-            model: Pedido, 
-            include: [{ model: Usuario }] // <-- Aninhar a inclusão do Usuário
-          }],
-        })
+          include: [{ model: Pedido, include: [{ model: Usuario }] }],
+        });
 
         if (!pagamento) {
-          console.log(`Pagamento não encontrado para pedido ${pedidoId}`)
-          return
+          console.warn(`[WEBHOOK] ⚠️  Nenhum registro de Pagamento para pedido #${pedidoId}`);
+          console.log(`${line}\n`);
+          return;
         }
 
-        let novoStatus = "pendente"
+        console.log(`[WEBHOOK]   Pagamento DB #${pagamento.id} | status atual: "${pagamento.status}"`);
 
-        switch (paymentData.status) {
-          case "approved":
-            novoStatus = "aprovado"
-            break
-          case "rejected":
-            novoStatus = "rejeitado"
-            break
-          case "cancelled":
-            novoStatus = "cancelado"
-            break
-          case "pending":
-          case "in_process":
-            novoStatus = "pendente"
-            break
-        }
+        const MP_STATUS_MAP = {
+          approved:   'aprovado',
+          rejected:   'rejeitado',
+          cancelled:  'cancelado',
+          pending:    'pendente',
+          in_process: 'pendente',
+        };
+        const novoStatus = MP_STATUS_MAP[paymentData.status] || 'pendente';
+        console.log(`[WEBHOOK]   Mapeando "${paymentData.status}" → "${novoStatus}"`);
 
-        await pagamento.update({
-          status: novoStatus,
-          dadosTransacao: paymentData,
-        })
+        await pagamento.update({ status: novoStatus, dadosTransacao: paymentData });
 
         if (novoStatus === "aprovado") {
+          console.log(`[WEBHOOK] ✅ APROVADO — atualizando pedido #${pedidoId} para "pago"`);
           await pedidoService.atualizarStatusPedido(pedidoId, "pago");
-
-          // !! ESTE É O LOCAL CORRETO PARA ENVIAR O EVENTO !!
-          if (pagamento.Pedido && pagamento.Pedido.Usuario) {
-             facebookCapiService.sendPurchaseEvent(pagamento.Pedido, pagamento.Pedido.Usuario);
+          if (pagamento.Pedido?.Usuario) {
+            console.log(`[WEBHOOK]   Disparando Facebook CAPI para pedido #${pedidoId}`);
+            facebookCapiService.sendPurchaseEvent(pagamento.Pedido, pagamento.Pedido.Usuario);
           } else {
-             console.error(`Facebook CAPI: Não foi possível enviar evento para o pedido #${pedidoId} pois os dados do pedido ou usuário não foram carregados.`);
+            console.warn(`[WEBHOOK]   Facebook CAPI: dados do usuário indisponíveis para pedido #${pedidoId}`);
           }
-          
         } else if (novoStatus === "rejeitado" || novoStatus === "cancelado") {
-          await pedidoService.cancelarPedido(pedidoId)
+          console.log(`[WEBHOOK] ❌ ${novoStatus.toUpperCase()} — cancelando pedido #${pedidoId}`);
+          await pedidoService.cancelarPedido(pedidoId);
+        } else {
+          console.log(`[WEBHOOK] ⏳ Pagamento "${novoStatus}" — nenhuma ação no pedido`);
         }
 
-        console.log(`Pagamento ${paymentId} atualizado para ${novoStatus}`)
-      } else if (type === "preapproval") {
-        // ... (seu código de assinatura permanece o mesmo)
+        console.log(`[WEBHOOK] ✔ Concluído | payment #${paymentId} → "${novoStatus}"`);
+      } else {
+        console.log(`[WEBHOOK]   Tipo "${type}" não tratado — ignorando`);
       }
+
+      console.log(`${line}\n`);
     } catch (error) {
-      console.error("Erro ao processar webhook:", error)
-      throw error
+      console.error(`[WEBHOOK] ❌ ERRO: ${error.message}`);
+      if (error.cause) console.error(`[WEBHOOK]   cause:`, JSON.stringify(error.cause));
+      console.log(`${'*'.repeat(60)}\n`);
+      throw error;
     }
   },
 
   async verificarStatusPagamento(pedidoId) {
+    console.log(`[SYNC] Verificando pagamento para pedido #${pedidoId}...`);
     try {
       const pagamento = await Pagamento.findOne({
         where: { pedidoId },
         include: [{ model: Pedido }],
-      })
+      });
 
-      if (!pagamento) {
-        throw new Error("Pagamento não encontrado")
-      }
+      if (!pagamento) throw new Error("Pagamento não encontrado");
+
+      console.log(`[SYNC]   transacaoId: ${pagamento.transacaoId} | status DB: ${pagamento.status}`);
 
       if (pagamento.transacaoId) {
         try {
-          const payment = await mercadopago.payment.findById(pagamento.transacaoId)
-          const paymentData = payment.body
+          const payment = await mercadopago.payment.findById(pagamento.transacaoId);
+          const paymentData = payment.body;
+          console.log(`[SYNC]   MP retornou status: "${paymentData.status}"`);
 
-          let statusAtualizado = pagamento.status
-
-          switch (paymentData.status) {
-            case "approved":
-              statusAtualizado = "aprovado"
-              break
-            case "rejected":
-              statusAtualizado = "rejeitado"
-              break
-            case "cancelled":
-              statusAtualizado = "cancelado"
-              break
-          }
+          const MP_STATUS_MAP = { approved: 'aprovado', rejected: 'rejeitado', cancelled: 'cancelado' };
+          const statusAtualizado = MP_STATUS_MAP[paymentData.status] || pagamento.status;
 
           if (statusAtualizado !== pagamento.status) {
-            await pagamento.update({ status: statusAtualizado, dadosTransacao: paymentData })
-            // Sincronizar status do pedido
+            console.log(`[SYNC]   Atualizando: "${pagamento.status}" → "${statusAtualizado}"`);
+            await pagamento.update({ status: statusAtualizado, dadosTransacao: paymentData });
             if (statusAtualizado === 'aprovado') {
-              await pedidoService.atualizarStatusPedido(pagamento.pedidoId, 'pago')
+              await pedidoService.atualizarStatusPedido(pagamento.pedidoId, 'pago');
             } else if (statusAtualizado === 'rejeitado' || statusAtualizado === 'cancelado') {
-              try { await pedidoService.cancelarPedido(pagamento.pedidoId) } catch (_) {}
+              try { await pedidoService.cancelarPedido(pagamento.pedidoId); } catch (_) {}
             }
+          } else {
+            console.log(`[SYNC]   Sem mudança — status já é "${statusAtualizado}"`);
           }
         } catch (mpError) {
-          console.error("Erro ao verificar status no MP:", mpError)
+          console.error(`[SYNC]   Erro ao consultar MP: ${mpError.message}`);
         }
+      } else {
+        console.log(`[SYNC]   Sem transacaoId numérico — pulando consulta MP`);
       }
 
-      return pagamento
+      return pagamento;
     } catch (error) {
-      throw error
+      console.error(`[SYNC] ❌ ERRO: ${error.message}`);
+      throw error;
     }
   },
 
