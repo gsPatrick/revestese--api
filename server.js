@@ -39,6 +39,7 @@ const relatorioRoutes = require("./routes/relatorioRoutes")
 const subscriptionRoutes = require("./routes/subscriptionRoutes")
 const analyticsRoutes    = require("./routes/analyticsRoutes")
 const videoRoutes        = require("./routes/videoRoutes")
+const estoqueRoutes      = require("./routes/estoqueRoutes")
 
 const app = express()
 
@@ -126,6 +127,7 @@ app.use("/api/relatorios", relatorioRoutes)
 app.use("/api/subscriptions", subscriptionRoutes)
 app.use("/api/analytics",    analyticsRoutes)
 app.use("/api/admin/videos", videoRoutes)
+app.use("/api", estoqueRoutes)
 
 // Servir arquivos estáticos da pasta uploads
 app.use("/uploads", express.static(path.join(__dirname, "uploads")))

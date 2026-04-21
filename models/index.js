@@ -20,6 +20,7 @@
   const VariacaoProduto = require("./VariacaoProduto")
   const Acesso = require("./Acesso")
   const CarrinhoAbandonado = require("./CarrinhoAbandonado")
+  const HistoricoEstoque = require("./HistoricoEstoque")
 
 
   // Definir associações PRINCIPAIS no arquivo index.js
@@ -74,6 +75,14 @@
   // Produto & VariaçãoProduto
   Produto.hasMany(VariacaoProduto, { foreignKey: "produtoId", as: "variacoes" })
   VariacaoProduto.belongsTo(Produto, { foreignKey: "produtoId", as: "produto" })
+
+  // HistoricoEstoque
+  Produto.hasMany(HistoricoEstoque, { foreignKey: 'produtoId', as: 'historicoEstoque' })
+  HistoricoEstoque.belongsTo(Produto, { foreignKey: 'produtoId' })
+  VariacaoProduto.hasMany(HistoricoEstoque, { foreignKey: 'variacaoId', as: 'historico' })
+  HistoricoEstoque.belongsTo(VariacaoProduto, { foreignKey: 'variacaoId', as: 'variacao' })
+  Usuario.hasMany(HistoricoEstoque, { foreignKey: 'adminId' })
+  HistoricoEstoque.belongsTo(Usuario, { foreignKey: 'adminId', as: 'admin' })
 
 
   // --- Associações de Assinatura ---
@@ -135,4 +144,5 @@ Cupom.hasMany(Pedido, { foreignKey: 'cupomAplicadoId' });
     VariacaoProduto,
     Acesso,
     CarrinhoAbandonado,
+    HistoricoEstoque,
   };
