@@ -1,7 +1,10 @@
 const express = require("express")
 const categoriaController = require("../controllers/categoriaController")
 const { verifyToken, isAdmin } = require("../middleware/auth")
-const { singleUpload } = require("../middleware/upload")
+const multer = require("multer")
+
+// Memory storage: o buffer é passado diretamente para o uploadService (file server)
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } })
 
 const router = express.Router()
 
@@ -10,7 +13,7 @@ router.get("/", categoriaController.listarCategorias)
 router.get("/:id", categoriaController.buscarCategoria)
 
 // Upload de ícone personalizado (deve vir antes de /:id)
-router.post("/icone/upload", verifyToken, isAdmin, ...singleUpload("icone"), categoriaController.uploadIcone)
+router.post("/icone/upload", verifyToken, isAdmin, upload.single("icone"), categoriaController.uploadIcone)
 
 // Rotas administrativas
 router.post("/", verifyToken, isAdmin, categoriaController.criarCategoria)

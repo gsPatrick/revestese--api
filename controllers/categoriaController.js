@@ -89,14 +89,13 @@ const categoriaController = {
 
     async uploadIcone(req, res, next) {
         try {
-            if (!req.processedImage) {
+            if (!req.file) {
                 return res.status(400).json({ erro: 'Nenhuma imagem enviada.' });
             }
-            // Usa a variante medium/webp como URL do ícone
-            const url = req.processedImage.variants?.medium?.webp?.path
-                     || req.processedImage.variants?.small?.webp?.path
-                     || `/uploads/imagens/medium/${req.processedImage.filename}.webp`;
-            res.json({ url });
+            const uploadService = require('../services/uploadService');
+            const imagemInfo = await uploadService.processarESalvarImagem(req.file);
+            // Retorna a URL completa do file server
+            res.json({ url: imagemInfo.url });
         } catch (error) {
             next(error);
         }
