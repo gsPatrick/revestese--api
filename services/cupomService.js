@@ -35,7 +35,7 @@ const cupomService = {
       case "primeira_compra": {
         if (!usuarioId) throw new Error("Este cupom é exclusivo para novos clientes. Faça login para usá-lo.");
         const pedidosAnteriores = await Pedido.count({
-          where: { usuarioId, status: { [Op.in]: ["pago", "processando", "enviado", "entregue"] } },
+          where: { usuarioId, status: { [Op.in]: ["pago", "preparando", "enviado", "entregue"] } },
         });
         if (pedidosAnteriores > 0) throw new Error("Este cupom é válido apenas para sua primeira compra.");
         break;

@@ -64,7 +64,7 @@ const notificacaoService = {
 
       const statusMessages = {
         pago: "foi confirmado e está sendo processado",
-        processando: "está sendo preparado para envio",
+        preparando: "está sendo preparado para envio",
         enviado: "foi enviado e está a caminho",
         entregue: "foi entregue com sucesso",
         cancelado: "foi cancelado",

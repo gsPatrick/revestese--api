@@ -402,7 +402,7 @@ const pedidoService = {
     const pedidos = await Pedido.findAll({
       where: {
         usuarioId,
-        status: { [Op.in]: ["pago", "processando", "enviado", "entregue", "concluido"] },
+        status: { [Op.in]: ["pago", "preparando", "enviado", "entregue", "concluido"] },
       },
       attributes: ["itens"],
     });
@@ -413,7 +413,7 @@ const pedidoService = {
     const pedidos = await Pedido.findAll({
       where: {
         usuarioId,
-        status: { [Op.in]: ["pago", "processando", "enviado", "entregue", "concluido"] },
+        status: { [Op.in]: ["pago", "preparando", "enviado", "entregue", "concluido"] },
       },
       attributes: ["itens"],
     });
@@ -433,7 +433,7 @@ const pedidoService = {
 
   async obterDownloadsPorUsuario(usuarioId) {
     const pedidos = await Pedido.findAll({
-      where: { usuarioId, status: ['pago', 'processando', 'enviado', 'entregue', 'concluido'] },
+      where: { usuarioId, status: ['pago', 'preparando', 'enviado', 'entregue', 'concluido'] },
       attributes: ['itens'],
     });
 

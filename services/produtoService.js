@@ -372,7 +372,7 @@ const produtoService = {
     try {
       const pedidos = await Pedido.findAll({
         where: {
-          status: { [Op.in]: ['pago', 'processando', 'enviado', 'entregue'] }
+          status: { [Op.in]: ['pago', 'preparando', 'enviado', 'entregue'] }
         },
         attributes: ['itens']
       });
