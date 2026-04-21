@@ -158,8 +158,52 @@ async function iniciarServidor() {
     app.listen(PORT, () => {
       console.log(`Servidor rodando na porta ${PORT}`)
     })
+
+    // Sync assíncrono de pagamentos pendentes (não bloqueia o start)
+    sincronizarPagamentosPendentes().catch(err =>
+      console.error('[Startup Sync] Erro:', err.message)
+    );
   } catch (error) {
     console.error("Erro ao conectar com banco de dados:", error)
+  }
+}
+
+async function sincronizarPagamentosPendentes() {
+  try {
+    const { Pedido, Pagamento } = require('./models');
+    const pagamentoService = require('./services/pagamentoService');
+
+    // Busca pedidos pendentes que tenham um registro de pagamento com transacaoId
+    const pedidosPendentes = await Pedido.findAll({
+      where: { status: 'pendente' },
+      include: [{
+        model: Pagamento,
+        required: true,
+        where: { transacaoId: { [require('sequelize').Op.ne]: null } },
+      }],
+    });
+
+    if (pedidosPendentes.length === 0) {
+      console.log('[Startup Sync] Nenhum pagamento pendente para sincronizar.');
+      return;
+    }
+
+    console.log(`[Startup Sync] Sincronizando ${pedidosPendentes.length} pedido(s) pendente(s)...`);
+
+    for (const pedido of pedidosPendentes) {
+      try {
+        await pagamentoService.verificarStatusPagamento(pedido.id);
+        console.log(`[Startup Sync] Pedido #${pedido.id} sincronizado.`);
+      } catch (err) {
+        console.error(`[Startup Sync] Falha no pedido #${pedido.id}: ${err.message}`);
+      }
+      // Pequeno intervalo para não sobrecarregar a API do MP
+      await new Promise(r => setTimeout(r, 300));
+    }
+
+    console.log('[Startup Sync] Concluído.');
+  } catch (err) {
+    console.error('[Startup Sync] Erro geral:', err.message);
   }
 }
 
