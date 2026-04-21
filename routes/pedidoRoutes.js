@@ -18,6 +18,7 @@ router.get("/meus/downloads", pedidoController.obterDownloadsUsuario);
 router.use(isAdmin); // A partir daqui, precisa ser admin
 router.get("/", pedidoController.listarPedidosAdmin);
 router.put("/:id/status", pedidoController.atualizarStatus);
+router.put("/:id/rastreio", pedidoController.atualizarRastreio);
 router.put("/:id/nota-interna", pedidoController.adicionarNotaInterna);
 router.post("/:id/etiqueta", pedidoController.gerarEtiqueta);
 router.post("/etiqueta/comprar", pedidoController.comprarEtiqueta);

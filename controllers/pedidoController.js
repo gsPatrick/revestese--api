@@ -153,6 +153,21 @@ const pedidoController = {
     }
   },
 
+  async atualizarRastreio(req, res, next) {
+    try {
+      const { id } = req.params;
+      const { codigoRastreio } = req.body;
+      const { Frete } = require('../models');
+      const frete = await Frete.findOne({ where: { pedidoId: id } });
+      if (!frete) return res.status(404).json({ erro: 'Frete não encontrado para este pedido.' });
+      await frete.update({ codigoRastreio: codigoRastreio || null });
+      console.log(`[PEDIDO] 📦 Rastreio do pedido #${id} atualizado: ${codigoRastreio}`);
+      res.json({ success: true, codigoRastreio: frete.codigoRastreio });
+    } catch (error) {
+      next(error);
+    }
+  },
+
   async adicionarNotaInterna(req, res, next) {
     try {
       const { id } = req.params
