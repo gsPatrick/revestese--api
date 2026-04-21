@@ -318,11 +318,11 @@ const pedidoService = {
   },
 
   async buscarPedidoPorId(pedidoId) {
+    // Busca pedido + usuario + pagamentos (sem Frete no JOIN para evitar conflitos de colunas)
     const pedido = await Pedido.findByPk(pedidoId, {
       include: [
-        { model: Usuario, attributes: ['id', 'nome', 'email', 'telefone', 'cpf'] },
+        { model: Usuario, attributes: ['id', 'nome', 'email'] },
         { model: Pagamento },
-        { model: Frete },
       ],
     });
     if (!pedido) throw new Error("Pedido não encontrado");
@@ -333,23 +333,28 @@ const pedidoService = {
     json.usuario = json.Usuario || json.usuario || null;
     delete json.Usuario;
 
-    // Expõe dados do frete de forma uniforme
-    if (json.Frete) {
-      json.dadosFrete = {
-        name: json.Frete.servico,
-        servico: json.Frete.servico,
-        valor: json.Frete.valor,
-        delivery_time: json.Frete.prazoEntrega,
-        codigoRastreio: json.Frete.codigoRastreio,
-        statusEntrega: json.Frete.statusEntrega,
-      };
+    // Busca frete separadamente (evita conflito de colunas no JOIN)
+    try {
+      const frete = await Frete.findOne({ where: { pedidoId } });
+      if (frete) {
+        json.dadosFrete = {
+          name: frete.servico,
+          servico: frete.servico,
+          valor: parseFloat(frete.valor),
+          delivery_time: frete.prazoEntrega,
+          codigoRastreio: frete.codigoRastreio || null,
+          statusEntrega: frete.statusEntrega,
+        };
+        json.valorFrete = parseFloat(frete.valor);
+      }
+    } catch (e) {
+      console.warn('[PEDIDO] Aviso: erro ao buscar frete separado:', e.message);
     }
-    delete json.Frete;
 
     // Enriquece itens com nome do produto e variação
     const itens = json.itens || [];
     if (itens.length > 0) {
-      const produtoIds = [...new Set(itens.map(i => i.produtoId).filter(Boolean))];
+      const produtoIds  = [...new Set(itens.map(i => i.produtoId).filter(Boolean))];
       const variacaoIds = [...new Set(itens.map(i => i.variacaoId).filter(Boolean))];
 
       const [produtos, variacoes] = await Promise.all([
