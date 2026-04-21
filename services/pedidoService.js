@@ -193,23 +193,33 @@ const pedidoService = {
   // ─────────────────────────────────────────────────────────────────────────────
   async atualizarStatusPedido(pedidoId, status) {
     console.log(`[PEDIDO] 🔄 Atualizando pedido #${pedidoId} → status "${status}"`);
-    const pedido = await Pedido.findByPk(pedidoId, { include: [{ model: Usuario }] });
+
+    // Restringe atributos do JOIN para evitar conflito de colunas (underscored vs camelCase)
+    const pedido = await Pedido.findByPk(pedidoId, {
+      include: [{ model: Usuario, attributes: ['id', 'nome', 'email'] }],
+    });
     if (!pedido) throw new Error("Pedido não encontrado");
 
     const eraCancelado = pedido.status === "cancelado";
 
     // Decrementa cupom ao cancelar (apenas uma vez — se não estava já cancelado)
     if (!eraCancelado && status === "cancelado" && pedido.cupomAplicadoId) {
-      await cupomService.decrementarUso(pedido.cupomAplicadoId);
+      try {
+        await cupomService.decrementarUso(pedido.cupomAplicadoId);
+      } catch (cupomErr) {
+        console.warn(`[PEDIDO] ⚠️  Erro ao decrementar cupom: ${cupomErr.message}`);
+      }
     }
 
     pedido.status = status;
     await pedido.save();
+    console.log(`[PEDIDO] ✅ Pedido #${pedidoId} atualizado para "${status}"`);
 
+    // Notificação por e-mail — nunca deve bloquear a resposta
     try {
       await notificacaoService.enviarAtualizacaoStatus(pedidoId, status);
     } catch (emailError) {
-      console.error("Erro ao enviar notificação de status:", emailError.message);
+      console.warn(`[PEDIDO] ⚠️  Notificação de status não enviada: ${emailError.message}`);
     }
 
     if (status === "pago") {

@@ -54,11 +54,12 @@ const notificacaoService = {
   async enviarAtualizacaoStatus(pedidoId, novoStatus) {
     try {
       const pedido = await Pedido.findByPk(pedidoId, {
-        include: [{ model: Usuario }],
+        include: [{ model: Usuario, attributes: ['id', 'nome', 'email'] }],
       })
 
-      if (!pedido) {
-        throw new Error("Pedido não encontrado")
+      if (!pedido || !pedido.Usuario?.email) {
+        console.warn(`[NOTIF] ⚠️  Pedido #${pedidoId} sem usuário vinculado — e-mail de status ignorado.`);
+        return;
       }
 
       const statusMessages = {
@@ -74,7 +75,7 @@ const notificacaoService = {
       const html = `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
           <h1 style="color: #3B82F6;">Atualização do Pedido #${pedido.id}</h1>
-          <p>Olá <strong>${pedido.Usuario.nome}</strong>,</p>
+          <p>Olá <strong>${pedido.Usuario.nome || 'cliente'}</strong>,</p>
           <p>Seu pedido <strong>#${pedido.id}</strong> ${message}.</p>
           
           <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
@@ -83,33 +84,18 @@ const notificacaoService = {
             <p><strong>Data da atualização:</strong> ${new Date().toLocaleDateString("pt-BR")}</p>
           </div>
 
-          ${
-            novoStatus === "enviado"
-              ? `
-            <p>Seu pedido foi enviado! Você receberá o código de rastreamento em breve.</p>
-          `
-              : ""
-          }
-
-          ${
-            novoStatus === "entregue"
-              ? `
-            <p>Esperamos que você esteja satisfeito com sua compra!</p>
-            <p>Não se esqueça de avaliar os produtos que você comprou.</p>
-          `
-              : ""
-          }
+          ${novoStatus === "enviado" ? `<p>Seu pedido foi enviado! Você receberá o código de rastreamento em breve.</p>` : ""}
+          ${novoStatus === "entregue" ? `<p>Esperamos que você esteja satisfeito com sua compra!</p>` : ""}
 
           <p>Obrigado por comprar conosco!</p>
         </div>
       `
 
       await enviarEmail(pedido.Usuario.email, `Pedido #${pedido.id} - Status Atualizado: ${novoStatus}`, html)
-
       return { message: "Email de atualização enviado" }
     } catch (error) {
-      console.error("Erro ao enviar atualização:", error)
-      throw error
+      console.error("Erro ao enviar atualização:", error.message)
+      // Não re-lança — falha de e-mail nunca deve bloquear a atualização de status
     }
   },
 
