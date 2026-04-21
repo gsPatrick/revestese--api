@@ -84,7 +84,7 @@ app.use(helmet({
 }))
 app.use(cors({
   origin: "*", // Em produção, restrinja para o seu domínio
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
 }));
 
