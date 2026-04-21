@@ -302,7 +302,11 @@ const pedidoService = {
           produto: { id: produto?.id || null, nome: produto?.nome || 'Produto não encontrado', imagemUrl },
         };
       });
-      return { ...pedido.toJSON(), itens: itensComDetalhes };
+      const json = pedido.toJSON();
+      // Normaliza Usuario → usuario (minúsculo) para consistência com o frontend
+      json.usuario = json.Usuario || json.usuario || null;
+      delete json.Usuario;
+      return { ...json, itens: itensComDetalhes };
     });
 
     return {
@@ -315,10 +319,61 @@ const pedidoService = {
 
   async buscarPedidoPorId(pedidoId) {
     const pedido = await Pedido.findByPk(pedidoId, {
-      include: [{ model: Usuario, attributes: ["nome", "email"] }, { model: Pagamento }],
+      include: [
+        { model: Usuario, attributes: ['id', 'nome', 'email', 'telefone', 'cpf'] },
+        { model: Pagamento },
+        { model: Frete },
+      ],
     });
     if (!pedido) throw new Error("Pedido não encontrado");
-    return pedido;
+
+    const json = pedido.toJSON();
+
+    // Normaliza associação Usuario → usuario (minúsculo)
+    json.usuario = json.Usuario || json.usuario || null;
+    delete json.Usuario;
+
+    // Expõe dados do frete de forma uniforme
+    if (json.Frete) {
+      json.dadosFrete = {
+        name: json.Frete.servico,
+        servico: json.Frete.servico,
+        valor: json.Frete.valor,
+        delivery_time: json.Frete.prazoEntrega,
+        codigoRastreio: json.Frete.codigoRastreio,
+        statusEntrega: json.Frete.statusEntrega,
+      };
+    }
+    delete json.Frete;
+
+    // Enriquece itens com nome do produto e variação
+    const itens = json.itens || [];
+    if (itens.length > 0) {
+      const produtoIds = [...new Set(itens.map(i => i.produtoId).filter(Boolean))];
+      const variacaoIds = [...new Set(itens.map(i => i.variacaoId).filter(Boolean))];
+
+      const [produtos, variacoes] = await Promise.all([
+        produtoIds.length > 0
+          ? Produto.findAll({ where: { id: { [Op.in]: produtoIds } }, attributes: ['id', 'nome'] })
+          : [],
+        variacaoIds.length > 0
+          ? VariacaoProduto.findAll({ where: { id: { [Op.in]: variacaoIds } }, attributes: ['id', 'nome', 'preco'] })
+          : [],
+      ]);
+
+      const pMap = {};
+      const vMap = {};
+      produtos.forEach(p => { pMap[p.id] = p; });
+      variacoes.forEach(v => { vMap[v.id] = v; });
+
+      json.itens = itens.map(item => ({
+        ...item,
+        produto:  { id: item.produtoId,  nome: pMap[item.produtoId]?.nome  || 'Produto removido' },
+        variacao: item.variacaoId ? { id: item.variacaoId, nome: vMap[item.variacaoId]?.nome || 'Variação removida' } : null,
+      }));
+    }
+
+    return json;
   },
 
   // ─────────────────────────────────────────────────────────────────────────────
