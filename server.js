@@ -173,13 +173,21 @@ async function sincronizarPagamentosPendentes() {
     const { Pedido, Pagamento } = require('./models');
     const pagamentoService = require('./services/pagamentoService');
 
-    // Busca pedidos pendentes que tenham um registro de pagamento com transacaoId
+    // Busca pedidos pendentes com pagamento que tenha um payment ID numérico real
+    // (o transacaoId salvo no checkout é o ID da preferência, que é alfanumérico;
+    //  o payment ID real só existe depois que o usuário paga e o webhook dispara)
+    const { Op } = require('sequelize');
     const pedidosPendentes = await Pedido.findAll({
       where: { status: 'pendente' },
       include: [{
         model: Pagamento,
         required: true,
-        where: { transacaoId: { [require('sequelize').Op.ne]: null } },
+        where: {
+          transacaoId: {
+            [Op.ne]: null,
+            [Op.regexp]: '^[0-9]+$', // apenas IDs numéricos (payment IDs reais)
+          },
+        },
       }],
     });
 
