@@ -153,11 +153,22 @@ async function iniciarServidor() {
     console.clear()
     console.log("Conexão com banco de dados estabelecida.")
 
+    // ── Migração manual: garante que o ENUM de pedidos.status inclui "preparando" ──
+    try {
+      await sequelize.query(
+        `ALTER TABLE pedidos MODIFY COLUMN status ENUM('pendente','pago','preparando','enviado','entregue','cancelado') NOT NULL DEFAULT 'pendente'`
+      );
+      console.log("[Migration] ENUM pedidos.status atualizado com sucesso.");
+    } catch (migErr) {
+      // Ignora se o valor já existir ou se a coluna já estiver correta
+      console.log("[Migration] ENUM pedidos.status já estava atualizado:", migErr.message);
+    }
+
     try {
       await sequelize.sync({ alter: true });
       console.log("Modelos sincronizados com o banco de dados.");
     } catch (syncError) {
-      console.error("Erro ao sincronizar modelos:", syncError)
+      console.error("Erro ao sincronizar modelos:", syncError.message);
     }
 
     await garantirAdminPadrao();
