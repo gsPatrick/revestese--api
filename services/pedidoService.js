@@ -213,7 +213,11 @@ const pedidoService = {
     }
 
     if (status === "pago") {
-      await enviarEmail(pedido.Usuario.email, "Pedido Confirmado", templateConfirmacaoPedido(pedido));
+      try {
+        await enviarEmail(pedido.Usuario?.email, "Pedido Confirmado", templateConfirmacaoPedido(pedido));
+      } catch (emailErr) {
+        console.warn(`[PEDIDO] ⚠️  E-mail de confirmação não enviado (${emailErr.message}) — pedido já foi salvo como "pago".`);
+      }
     }
 
     return pedido;
