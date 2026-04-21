@@ -72,7 +72,7 @@ const pagamentoService = {
         },
         auto_return: "approved",
         external_reference: pedidoId.toString(),
-        notification_url: `${process.env.URL + '/api/pagamentos/webhook' || "http://localhost:3035"}/api/pagamentos/webhook`,
+        notification_url: `${process.env.URL || "http://localhost:3035"}/api/pagamentos/webhook`,
         statement_descriptor: "ECOMMERCE",
         expires: true,
         expiration_date_from: formatDateToPreference(new Date()),
@@ -210,7 +210,13 @@ const pagamentoService = {
           }
 
           if (statusAtualizado !== pagamento.status) {
-            await pagamento.update({ status: statusAtualizado })
+            await pagamento.update({ status: statusAtualizado, dadosTransacao: paymentData })
+            // Sincronizar status do pedido
+            if (statusAtualizado === 'aprovado') {
+              await pedidoService.atualizarStatusPedido(pagamento.pedidoId, 'pago')
+            } else if (statusAtualizado === 'rejeitado' || statusAtualizado === 'cancelado') {
+              try { await pedidoService.cancelarPedido(pagamento.pedidoId) } catch (_) {}
+            }
           }
         } catch (mpError) {
           console.error("Erro ao verificar status no MP:", mpError)

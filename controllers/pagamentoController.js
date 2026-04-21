@@ -37,6 +37,16 @@ const pagamentoController = {
     }
   },
 
+  async syncPagamentoAdmin(req, res, next) {
+    try {
+      const { pedidoId } = req.params;
+      const pagamento = await pagamentoService.verificarStatusPagamento(pedidoId);
+      res.json({ ok: true, status: pagamento.status, pedidoId });
+    } catch (error) {
+      next(error);
+    }
+  },
+
   async listarPagamentos(req, res, next) {
     try {
       const filtros = req.query

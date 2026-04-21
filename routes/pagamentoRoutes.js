@@ -13,6 +13,7 @@ router.use(autenticar)
 
 router.post("/checkout", pagamentoController.criarCheckout)
 router.get("/status/:pedidoId", pagamentoController.verificarStatus)
+router.post("/admin/sync/:pedidoId", restringirAdmin, pagamentoController.syncPagamentoAdmin)
 router.get("/", pagamentoController.listarPagamentos)
 
 module.exports = router
