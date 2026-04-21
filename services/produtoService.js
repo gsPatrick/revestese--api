@@ -40,22 +40,10 @@ const produtoService = {
       if (!produto) {
         throw new Error("Produto não encontrado")
       }
-
-      // NOVO: Lógica para remover arquivos associados (chamar o uploadService)
-      const arquivosAssociados = await ArquivoProduto.findAll({ where: { produtoId: id } });
-      for (const arquivo of arquivosAssociados) {
-          try {
-              // Chama o uploadService para remover do File Server
-              await require('./uploadService').removerArquivo(arquivo.url);
-              await arquivo.destroy(); // Remove do banco de dados
-          } catch (err) {
-              console.warn(`Falha ao remover arquivo ${arquivo.url} do File Server ou DB: ${err.message}`);
-              // Continua a remoção do produto mesmo que o arquivo falhe
-          }
-      }
-
-      await produto.destroy()
-      return { message: "Produto removido com sucesso" }
+      // Soft-delete: oculta o produto sem apagar dados nem arquivos.
+      // Isso preserva as referências em pedidos já existentes.
+      await produto.update({ ativo: false })
+      return { message: "Produto ocultado com sucesso" }
     } catch (error) {
       throw error
     }
