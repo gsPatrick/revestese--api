@@ -3,10 +3,8 @@
 const express = require('express');
 const router = express.Router();
 const uploadController = require('../controllers/uploadController');
+const { verifyToken, isAdmin } = require('../middleware/auth');
 
-// Importe o multer e configure-o para usar memória
-// É CRÍTICO que o multer use memoryStorage para que o buffer do arquivo seja passado
-// para o uploadService, que por sua vez o envia para o File Server.
 const multer = require('multer');
 const upload = multer({ storage: multer.memoryStorage() }); 
 
@@ -31,7 +29,7 @@ router.put('/produtos/:produtoId/imagens/:arquivoId/principal', uploadController
 router.put('/produtos/:produtoId/imagens/ordem', uploadController.atualizarOrdemImagens);
 
 // Rota para excluir arquivos (imagens, digitais, vídeos)
-router.delete('/arquivos/:arquivoId', uploadController.excluirArquivo);
+router.delete('/arquivos/:arquivoId', verifyToken, isAdmin, uploadController.excluirArquivo);
 
 
 module.exports = router;
