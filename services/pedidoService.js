@@ -365,7 +365,7 @@ const pedidoService = {
       console.warn('[PEDIDO] Aviso: erro ao buscar frete separado:', e.message);
     }
 
-    // Enriquece itens com nome do produto e variação
+    // Enriquece itens com nome, imagem do produto e variação
     const itens = json.itens || [];
     if (itens.length > 0) {
       const produtoIds  = [...new Set(itens.map(i => i.produtoId).filter(Boolean))];
@@ -373,7 +373,11 @@ const pedidoService = {
 
       const [produtos, variacoes] = await Promise.all([
         produtoIds.length > 0
-          ? Produto.findAll({ where: { id: { [Op.in]: produtoIds } }, attributes: ['id', 'nome'] })
+          ? Produto.findAll({
+              where: { id: { [Op.in]: produtoIds } },
+              attributes: ['id', 'nome'],
+              include: [{ model: ArquivoProduto, as: 'ArquivoProdutos', where: { tipo: 'imagem' }, required: false, limit: 1 }],
+            })
           : [],
         variacaoIds.length > 0
           ? VariacaoProduto.findAll({ where: { id: { [Op.in]: variacaoIds } }, attributes: ['id', 'nome', 'preco'] })
@@ -385,11 +389,15 @@ const pedidoService = {
       produtos.forEach(p => { pMap[p.id] = p; });
       variacoes.forEach(v => { vMap[v.id] = v; });
 
-      json.itens = itens.map(item => ({
-        ...item,
-        produto:  { id: item.produtoId,  nome: pMap[item.produtoId]?.nome  || 'Produto removido' },
-        variacao: item.variacaoId ? { id: item.variacaoId, nome: vMap[item.variacaoId]?.nome || 'Variação removida' } : null,
-      }));
+      json.itens = itens.map(item => {
+        const prod = pMap[item.produtoId];
+        const imagemUrl = prod?.ArquivoProdutos?.[0]?.url || null;
+        return {
+          ...item,
+          produto:  { id: item.produtoId, nome: prod?.nome || item.nome || 'Produto removido', imagemUrl },
+          variacao: item.variacaoId ? { id: item.variacaoId, nome: vMap[item.variacaoId]?.nome || item.nome || 'Variação removida' } : null,
+        };
+      });
     }
 
     return json;
