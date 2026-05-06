@@ -31,12 +31,18 @@ const pedidoService = {
       let dadosFrete = null;
       let cupomAplicadoId = null;
 
-      // 1. Verificar se todos os itens são digitais
+      // 1. Verificar se todos os itens são digitais (resolve variação padrão se variacaoId vier vazio)
       const verificacoesDigitais = await Promise.all(itensPedido.map(async (item) => {
-        if (!item.variacaoId) return false;
-        const v = await VariacaoProduto.findOne(
-          { where: { id: item.variacaoId, produtoId: item.produtoId }, transaction: t }
-        );
+        let v = item.variacaoId
+          ? await VariacaoProduto.findOne({
+              where: { id: item.variacaoId, produtoId: item.produtoId },
+              transaction: t,
+            })
+          : await VariacaoProduto.findOne({
+              where: { produtoId: item.produtoId, ativo: true },
+              order: [["id", "ASC"]],
+              transaction: t,
+            });
         if (!v || !v.ativo) return false;
         return v.digital;
       }));
@@ -54,36 +60,46 @@ const pedidoService = {
         const produto = await Produto.findByPk(item.produtoId, { transaction: t });
         if (!produto || !produto.ativo) throw new Error(`Produto ${item.produtoId} não encontrado ou inativo.`);
 
-        let precoBase, eDigital;
-
-        if (item.variacaoId) {
-          const variacao = await VariacaoProduto.findOne(
-            { where: { id: item.variacaoId, produtoId: item.produtoId }, transaction: t }
-          );
-          if (!variacao || !variacao.ativo)
-            throw new Error(`Variação ${item.variacaoId} para "${produto.nome}" não encontrada ou inativa.`);
-          precoBase = variacao.preco;
-          eDigital  = variacao.digital;
-
-          // Pré-checagem rápida (a deducão atômica abaixo é a garantia real)
-          if (!eDigital && variacao.estoque < item.quantidade)
-            throw new Error(`Estoque insuficiente para "${variacao.nome}".`);
-        } else {
-          precoBase = produto.preco;
-          eDigital  = false;
-          if (produto.estoque < item.quantidade)
-            throw new Error(`Estoque insuficiente para "${produto.nome}".`);
+        const qty = parseInt(item.quantidade, 10);
+        if (!Number.isFinite(qty) || qty < 1) {
+          throw new Error(`Quantidade inválida para "${produto.nome}".`);
         }
 
-        total += parseFloat(precoBase) * item.quantidade;
-        quantidadeTotalItens += item.quantidade;
+        const variacao = item.variacaoId
+          ? await VariacaoProduto.findOne({
+              where: { id: item.variacaoId, produtoId: item.produtoId },
+              transaction: t,
+            })
+          : await VariacaoProduto.findOne({
+              where: { produtoId: item.produtoId, ativo: true },
+              order: [["id", "ASC"]],
+              transaction: t,
+            });
+
+        if (!variacao || !variacao.ativo) {
+          throw new Error(
+            item.variacaoId
+              ? `Variação ${item.variacaoId} para "${produto.nome}" não encontrada ou inativa.`
+              : `Produto "${produto.nome}" não possui variação disponível para compra.`
+          );
+        }
+
+        const precoBase = variacao.preco;
+        const eDigital = variacao.digital;
+
+        if (!eDigital && variacao.estoque < qty) {
+          throw new Error(`Estoque insuficiente para "${variacao.nome}".`);
+        }
+
+        total += parseFloat(precoBase) * qty;
+        quantidadeTotalItens += qty;
         itensProcessados.push({
           produtoId: item.produtoId,
-          variacaoId: item.variacaoId || null,
-          nome: item.variacaoId ? `${produto.nome} - ${(await VariacaoProduto.findByPk(item.variacaoId, { transaction: t }))?.nome}` : produto.nome,
+          variacaoId: variacao.id,
+          nome: `${produto.nome} - ${variacao.nome}`,
           preco: parseFloat(precoBase),
-          quantidade: item.quantidade,
-          subtotal: parseFloat(precoBase) * item.quantidade,
+          quantidade: qty,
+          subtotal: parseFloat(precoBase) * qty,
           digital: eDigital,
         });
       }
@@ -146,31 +162,20 @@ const pedidoService = {
         await Frete.create({ pedidoId: pedido.id, ...dadosFrete }, { transaction: t });
       }
 
-      // 8. DEDUCÃO ATÔMICA DE ESTOQUE
-      // UPDATE ... SET estoque = estoque - N WHERE id = ? AND estoque >= N
-      // Se affected = 0, o estoque acabou entre a checagem e a gravação → rollback.
+      // 8. Baixa de estoque (linha bloqueada na transaction — não usa coluna inexistente em produtos)
       for (const item of itensProcessados) {
         if (item.digital) continue;
-
-        if (item.variacaoId) {
-          const [affected] = await VariacaoProduto.update(
-            { estoque: sequelize.literal(`estoque - ${item.quantidade}`) },
-            {
-              where: { id: item.variacaoId, estoque: { [Op.gte]: item.quantidade } },
-              transaction: t,
-            }
-          );
-          if (affected === 0) throw new Error(`Estoque esgotado para "${item.nome}" durante a finalização.`);
-        } else {
-          const [affected] = await Produto.update(
-            { estoque: sequelize.literal(`estoque - ${item.quantidade}`) },
-            {
-              where: { id: item.produtoId, estoque: { [Op.gte]: item.quantidade } },
-              transaction: t,
-            }
-          );
-          if (affected === 0) throw new Error(`Estoque esgotado para "${item.nome}" durante a finalização.`);
+        const qty = parseInt(item.quantidade, 10);
+        const variacao = await VariacaoProduto.findOne({
+          where: { id: item.variacaoId, produtoId: item.produtoId },
+          transaction: t,
+          lock: true,
+        });
+        if (!variacao) throw new Error(`Variação não encontrada ao baixar estoque (${item.nome}).`);
+        if (variacao.estoque < qty) {
+          throw new Error(`Estoque esgotado para "${item.nome}" durante a finalização.`);
         }
+        await variacao.update({ estoque: variacao.estoque - qty }, { transaction: t });
       }
 
       // 9. Commit — tudo OK
@@ -249,20 +254,18 @@ const pedidoService = {
         await cupomService.decrementarUso(pedido.cupomAplicadoId, t);
       }
 
-      // Restaurar estoque atomicamente
+      // Restaurar estoque (sem literal SQL — mesmo caminho da baixa no pedido)
       for (const item of pedido.itens) {
-        if (item.digital) continue;
-        if (item.variacaoId) {
-          await VariacaoProduto.update(
-            { estoque: sequelize.literal(`estoque + ${item.quantidade}`) },
-            { where: { id: item.variacaoId }, transaction: t }
-          );
-        } else {
-          await Produto.update(
-            { estoque: sequelize.literal(`estoque + ${item.quantidade}`) },
-            { where: { id: item.produtoId }, transaction: t }
-          );
-        }
+        if (item.digital || !item.variacaoId) continue;
+        const qty = parseInt(item.quantidade, 10);
+        if (!Number.isFinite(qty) || qty < 1) continue;
+        const variacao = await VariacaoProduto.findOne({
+          where: { id: item.variacaoId, produtoId: item.produtoId },
+          transaction: t,
+          lock: true,
+        });
+        if (!variacao || variacao.digital) continue;
+        await variacao.update({ estoque: variacao.estoque + qty }, { transaction: t });
       }
 
       pedido.status = "cancelado";
